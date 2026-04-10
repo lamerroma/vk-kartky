@@ -20,8 +20,24 @@ STATIC_DIR = os.path.join(BASE_DIR, 'static')
 
 app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
 
-# ─── DATABASE ────────────────────────────────────────────────
+# ─── FIX #2: SECRET_KEY через файл у DATA_DIR ────────────────
+def _load_or_create_secret_key():
+    key_path = os.path.join(DATA_DIR, 'secret.key')
+    if os.path.exists(key_path):
+        with open(key_path, 'rb') as f:
+            return f.read()
+    key = os.urandom(32)
+    with open(key_path, 'wb') as f:
+        f.write(key)
+    return key
 
+app.secret_key = _load_or_create_secret_key()
+
+# ─── FIX #3: Обмеження розміру запиту ────────────────────────
+_max_mb = int(os.environ.get('MAX_UPLOAD_MB', 2))
+app.config['MAX_CONTENT_LENGTH'] = _max_mb * 1024 * 1024
+
+# ─── DATABASE ────────────────────────────────────────────────
 def get_db():
     if 'db' not in g:
         g.db = sqlite3.connect(DB_PATH, timeout=10)
@@ -36,222 +52,225 @@ def close_db(error):
     if db is not None:
         db.close()
 
+# ─── FIX #7: get_all_settings через get_db() ─────────────────
 def get_all_settings():
-    conn = None
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=10)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute('SELECT key, value FROM settings').fetchall()
+        rows = get_db().execute('SELECT key, value FROM settings').fetchall()
         return {r['key']: r['value'] for r in rows}
     except Exception:
         return {}
-    finally:
-        if conn:
-            conn.close()
 
+# ─── FIX #1: Allowlist для безпечного ALTER TABLE ────────────
+_ALLOWED_COL_TYPES = {'TEXT', 'INTEGER', 'REAL', 'BLOB', 'NUMERIC'}
+
+def _safe_add_column(cursor, table, col_name, col_type):
+    """Додає колонку тільки якщо назва і тип є в allowlist."""
+    if not col_name.replace('_', '').isalnum():
+        raise ValueError(f'Недопустима назва колонки: {col_name!r}')
+    if col_type.upper() not in _ALLOWED_COL_TYPES:
+        raise ValueError(f'Недопустимий тип колонки: {col_type!r}')
+    cursor.execute(f'ALTER TABLE {table} ADD COLUMN {col_name} {col_type}')
+
+# ─── FIX #5: init_db через app.app_context() ─────────────────
 def init_db():
-    conn = sqlite3.connect(DB_PATH, timeout=10)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode=WAL")
-    c = conn.cursor()
+    with app.app_context():
+        conn = get_db()
+        c = conn.cursor()
 
-    c.execute('''CREATE TABLE IF NOT EXISTS employees (
-        id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+        c.execute('''CREATE TABLE IF NOT EXISTS employees (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            -- Службові
+            tabelny_nomer TEXT,
+            data_zapovnennia TEXT DEFAULT (date('now')),
+            nazva_pidpryemstva TEXT,
+            kod_edrpou TEXT,
+            vyd_roboty TEXT,
+            -- Персональні
+            prizvyshche TEXT NOT NULL,
+            imia TEXT NOT NULL,
+            po_batkovi TEXT,
+            data_narodzhennia TEXT,
+            gender TEXT,
+            hromadianstvo TEXT DEFAULT 'Українець/ка',
+            ipn TEXT,
+            -- Паспорт
+            pasport TEXT,
+            pasport_vydanyi TEXT,
+            data_vydachi_pasportu TEXT,
+            id_karta TEXT,
+            id_karta_diisna_do TEXT,
+            -- Адреса
+            adresa_faktychna TEXT,
+            adresa_reiestratsiya TEXT,
+            -- Поточна робота
+            nazva_pidrozdilu TEXT,
+            data_pryyomu TEXT,
+            data_zvilnennia TEXT,
+            prychyna_zvilnennia TEXT,
+            -- Сім'я
+            rodinny_stan TEXT,
+            -- Пенсія
+            pensiia TEXT,
+            -- FIX #9: виправлено typo grupa_oblikyy -> grupa_obliku
+            grupa_obliku TEXT,
+            katehoriia_obliku TEXT,
+            sklad TEXT,
+            viiskove_zvannia TEXT,
+            viiskova_spetsialnist TEXT,
+            prydatnist TEXT,
+            nazva_viiskkomatu_reiestr TEXT,
+            nazva_viiskkomatu_faktych TEXT,
+            spec_oblik TEXT,
+            -- Додатково
+            data_pryyomu_naek TEXT,
+            dodatkovo TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        )''')
 
-        -- Службові
-        tabelny_nomer               TEXT,
-        data_zapovnennia            TEXT DEFAULT (date('now')),
-        nazva_pidpryemstva          TEXT,
-        kod_edrpou                  TEXT,
-        vyd_roboty                  TEXT,
+        # Міграція: додаємо колонки яких може не бути в старій базі
+        # FIX #1: використовуємо _safe_add_column замість f-string напряму
+        new_columns = [
+            ('nazva_pidpryemstva', 'TEXT'),
+            ('kod_edrpou', 'TEXT'),
+            ('vyd_roboty', 'TEXT'),
+            ('gender', 'TEXT'),
+            ('ipn', 'TEXT'),
+            ('pasport', 'TEXT'),
+            ('pasport_vydanyi', 'TEXT'),
+            ('data_vydachi_pasportu', 'TEXT'),
+            ('id_karta', 'TEXT'),
+            ('id_karta_diisna_do', 'TEXT'),
+            ('adresa_faktychna', 'TEXT'),
+            ('adresa_reiestratsiya', 'TEXT'),
+            ('nazva_pidrozdilu', 'TEXT'),
+            ('data_pryyomu', 'TEXT'),
+            ('data_zvilnennia', 'TEXT'),
+            ('prychyna_zvilnennia', 'TEXT'),
+            ('rodinny_stan', 'TEXT'),
+            ('pensiia', 'TEXT'),
+            # FIX #9: виправлено typo
+            ('grupa_obliku', 'TEXT'),
+            ('katehoriia_obliku', 'TEXT'),
+            ('sklad', 'TEXT'),
+            ('viiskove_zvannia', 'TEXT'),
+            ('viiskova_spetsialnist', 'TEXT'),
+            ('prydatnist', 'TEXT'),
+            ('nazva_viiskkomatu_reiestr', 'TEXT'),
+            ('nazva_viiskkomatu_faktych', 'TEXT'),
+            ('spec_oblik', 'TEXT'),
+            ('data_pryyomu_naek', 'TEXT'),
+            ('dodatkovo', 'TEXT'),
+        ]
 
-        -- Персональні
-        prizvyshche                 TEXT NOT NULL,
-        imia                        TEXT NOT NULL,
-        po_batkovi                  TEXT,
-        data_narodzhennia           TEXT,
-        gender                      TEXT,
-        hromadianstvo               TEXT DEFAULT 'Українець/ка',
-        ipn                         TEXT,
+        existing = [row[1] for row in c.execute("PRAGMA table_info(employees)").fetchall()]
+        for col_name, col_type in new_columns:
+            if col_name not in existing:
+                _safe_add_column(c, 'employees', col_name, col_type)
 
-        -- Паспорт
-        pasport                     TEXT,
-        pasport_vydanyi             TEXT,
-        data_vydachi_pasportu       TEXT,
-        id_karta                    TEXT,
-        id_karta_diisna_do          TEXT,
+        c.execute('''CREATE TABLE IF NOT EXISTS education (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+            zaklad_nazva TEXT,
+            dyplom_seriya TEXT,
+            dyplom_nomer TEXT,
+            rik_zakinch TEXT,
+            spetsialnist TEXT,
+            kvalifikatsiia TEXT,
+            forma_navch TEXT,
+            -- Після дипломна
+            pislyadyplomna_typ TEXT,
+            pislyadyplomna_zakl TEXT,
+            pislyadyplomna_dypl TEXT,
+            pislyadyplomna_rik TEXT,
+            naukovyi_stupin TEXT
+        )''')
 
-        -- Адреса
-        adresa_faktychna            TEXT,
-        adresa_reiestratsiya        TEXT,
+        # Міграція education
+        edu_columns = [
+            ('pislyadyplomna_typ', 'TEXT'),
+            ('pislyadyplomna_zakl', 'TEXT'),
+            ('pislyadyplomna_dypl', 'TEXT'),
+            ('pislyadyplomna_rik', 'TEXT'),
+            ('naukovyi_stupin', 'TEXT'),
+        ]
+        existing_edu = [row[1] for row in c.execute("PRAGMA table_info(education)").fetchall()]
+        for col_name, col_type in edu_columns:
+            if col_name not in existing_edu:
+                _safe_add_column(c, 'education', col_name, col_type)
 
-        -- Поточна робота
-        nazva_pidrozdilu            TEXT,
-        data_pryyomu                TEXT,
-        data_zvilnennia             TEXT,
-        prychyna_zvilnennia         TEXT,
+        c.execute('''CREATE TABLE IF NOT EXISTS family (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+            relationship TEXT,
+            full_name TEXT,
+            birth_year TEXT
+        )''')
 
-        -- Сім'я
-        rodinny_stan                TEXT,
+        c.execute('''CREATE TABLE IF NOT EXISTS work_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+            start_date TEXT,
+            end_date TEXT,
+            nazva_pidrozdilu TEXT,
+            posada TEXT,
+            nakaz TEXT,
+            prychyna_zvilnennia TEXT
+        )''')
 
-        -- Пенсія
-        pensiia                     TEXT,
+        # Розділ ІІІ — Призначення і переведення
+        c.execute('''CREATE TABLE IF NOT EXISTS appointments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+            data TEXT,
+            nazva_pidrozdilu TEXT,
+            profesiya_posada TEXT,
+            nakaz_nomer TEXT
+        )''')
 
-        -- Військовий облік
-        grupa_oblikyy               TEXT,
-        katehoriia_obliku           TEXT,
-        sklad                       TEXT,
-        viiskove_zvannia            TEXT,
-        viiskova_spetsialnist       TEXT,
-        prydatnist                  TEXT,
-        nazva_viiskkomatu_reiestr   TEXT,
-        nazva_viiskkomatu_faktych   TEXT,
-        spec_oblik                  TEXT,
+        # Розділ IV — Відпустки
+        c.execute('''CREATE TABLE IF NOT EXISTS vacations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+            typ TEXT,
+            za_yakyi_period TEXT,
+            start_date TEXT,
+            end_date TEXT,
+            calendar_days INTEGER,
+            days INTEGER,
+            nakaz TEXT
+        )''')
 
-        -- Додатково
-        data_pryyomu_naek           TEXT,
-        dodatkovo                   TEXT,
+        # Міграція vacations
+        vac_columns = [('za_yakyi_period', 'TEXT'), ('calendar_days', 'INTEGER')]
+        existing_vac = [row[1] for row in c.execute("PRAGMA table_info(vacations)").fetchall()]
+        for col_name, col_type in vac_columns:
+            if col_name not in existing_vac:
+                _safe_add_column(c, 'vacations', col_name, col_type)
 
-        created_at                  TEXT DEFAULT (datetime('now')),
-        updated_at                  TEXT DEFAULT (datetime('now'))
-    )''')
+        # Налаштування
+        c.execute('''CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )''')
+        c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('nazva_pidpryemstva', '')")
+        c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('nazva_pidpryemstva_short', '')")
+        c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('kod_edrpou', '')")
 
-    # Міграція: додаємо ВСІ колонки яких може не бути в старій базі
-    new_columns = [
-        ('nazva_pidpryemstva',        'TEXT'),
-        ('kod_edrpou',                'TEXT'),
-        ('vyd_roboty',                'TEXT'),
-        ('gender',                    'TEXT'),
-        ('ipn',                       'TEXT'),
-        ('pasport',                   'TEXT'),
-        ('pasport_vydanyi',           'TEXT'),
-        ('data_vydachi_pasportu',     'TEXT'),
-        ('id_karta',                  'TEXT'),
-        ('id_karta_diisna_do',        'TEXT'),
-        ('adresa_faktychna',          'TEXT'),
-        ('adresa_reiestratsiya',      'TEXT'),
-        ('nazva_pidrozdilu',          'TEXT'),
-        ('data_pryyomu',              'TEXT'),
-        ('data_zvilnennia',           'TEXT'),
-        ('prychyna_zvilnennia',       'TEXT'),
-        ('rodinny_stan',              'TEXT'),
-        ('pensiia',                   'TEXT'),
-        ('grupa_oblikyy',             'TEXT'),
-        ('katehoriia_obliku',         'TEXT'),
-        ('sklad',                     'TEXT'),
-        ('viiskove_zvannia',          'TEXT'),
-        ('viiskova_spetsialnist',     'TEXT'),
-        ('prydatnist',                'TEXT'),
-        ('nazva_viiskkomatu_reiestr', 'TEXT'),
-        ('nazva_viiskkomatu_faktych', 'TEXT'),
-        ('spec_oblik',                'TEXT'),
-        ('data_pryyomu_naek',         'TEXT'),
-        ('dodatkovo',                 'TEXT'),
-    ]
-    existing = [row[1] for row in c.execute("PRAGMA table_info(employees)").fetchall()]
-    for col_name, col_type in new_columns:
-        if col_name not in existing:
-            c.execute(f'ALTER TABLE employees ADD COLUMN {col_name} {col_type}')
+        # Індекси для швидкого пошуку
+        c.execute('CREATE INDEX IF NOT EXISTS idx_prizvyshche ON employees(prizvyshche)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_tabelny ON employees(tabelny_nomer)')
 
-    c.execute('''CREATE TABLE IF NOT EXISTS education (
-        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-        employee_id         INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-        zaklad_nazva        TEXT,
-        dyplom_seriya       TEXT,
-        dyplom_nomer        TEXT,
-        rik_zakinch         TEXT,
-        spetsialnist        TEXT,
-        kvalifikatsiia      TEXT,
-        forma_navch         TEXT,
-        -- Після дипломна
-        pislyadyplomna_typ  TEXT,
-        pislyadyplomna_zakl TEXT,
-        pislyadyplomna_dypl TEXT,
-        pislyadyplomna_rik  TEXT,
-        naukovyi_stupin     TEXT
-    )''')
+        # FIX #12: індекси на employee_id в усіх дочірніх таблицях
+        c.execute('CREATE INDEX IF NOT EXISTS idx_education_emp ON education(employee_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_family_emp ON family(employee_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_work_history_emp ON work_history(employee_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_appointments_emp ON appointments(employee_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_vacations_emp ON vacations(employee_id)')
 
-    # Міграція education
-    edu_columns = [
-        ('pislyadyplomna_typ',  'TEXT'),
-        ('pislyadyplomna_zakl', 'TEXT'),
-        ('pislyadyplomna_dypl', 'TEXT'),
-        ('pislyadyplomna_rik',  'TEXT'),
-        ('naukovyi_stupin',     'TEXT'),
-    ]
-    existing_edu = [row[1] for row in c.execute("PRAGMA table_info(education)").fetchall()]
-    for col_name, col_type in edu_columns:
-        if col_name not in existing_edu:
-            c.execute(f'ALTER TABLE education ADD COLUMN {col_name} {col_type}')
-
-    c.execute('''CREATE TABLE IF NOT EXISTS family (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        employee_id     INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-        relationship    TEXT,
-        full_name       TEXT,
-        birth_year      TEXT
-    )''')
-
-    c.execute('''CREATE TABLE IF NOT EXISTS work_history (
-        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-        employee_id         INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-        start_date          TEXT,
-        end_date            TEXT,
-        nazva_pidrozdilu    TEXT,
-        posada              TEXT,
-        nakaz               TEXT,
-        prychyna_zvilnennia TEXT
-    )''')
-
-    # Розділ ІІІ — Призначення і переведення
-    c.execute('''CREATE TABLE IF NOT EXISTS appointments (
-        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-        employee_id         INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-        data                TEXT,
-        nazva_pidrozdilu    TEXT,
-        profesiya_posada    TEXT,
-        nakaz_nomer         TEXT
-    )''')
-
-    # Розділ IV — Відпустки
-    c.execute('''CREATE TABLE IF NOT EXISTS vacations (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        employee_id     INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-        typ             TEXT,
-        za_yakyi_period TEXT,
-        start_date      TEXT,
-        end_date        TEXT,
-        calendar_days   INTEGER,
-        days            INTEGER,
-        nakaz           TEXT
-    )''')
-
-    # Міграція vacations
-    vac_columns = [('za_yakyi_period', 'TEXT'), ('calendar_days', 'INTEGER')]
-    existing_vac = [row[1] for row in c.execute("PRAGMA table_info(vacations)").fetchall()]
-    for col_name, col_type in vac_columns:
-        if col_name not in existing_vac:
-            c.execute(f'ALTER TABLE vacations ADD COLUMN {col_name} {col_type}')
-
-    # Налаштування
-    c.execute('''CREATE TABLE IF NOT EXISTS settings (
-        key   TEXT PRIMARY KEY,
-        value TEXT
-    )''')
-    c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('nazva_pidpryemstva', '')")
-    c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('nazva_pidpryemstva_short', '')")
-    c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('kod_edrpou', '')")
-
-    # Індекси для швидкого пошуку
-    c.execute('CREATE INDEX IF NOT EXISTS idx_prizvyshche ON employees(prizvyshche)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_tabelny    ON employees(tabelny_nomer)')
-
-    conn.commit()
-    conn.close()
+        conn.commit()
 
 # ─── HELPERS ─────────────────────────────────────────────────
-
 def row_to_dict(row):
     return dict(row) if row else None
 
@@ -264,7 +283,7 @@ def validate_employee(data):
         return ['Невалідний формат даних (очікується JSON-об\'єкт)']
     errors = []
     prizvyshche = (data.get('prizvyshche') or '').strip()
-    imia        = (data.get('imia')        or '').strip()
+    imia = (data.get('imia') or '').strip()
     if not prizvyshche:
         errors.append('Прізвище є обов\'язковим полем')
     if not imia:
@@ -272,7 +291,6 @@ def validate_employee(data):
     return errors
 
 # ─── ROUTES: PAGES ───────────────────────────────────────────
-
 @app.route('/')
 def index():
     return redirect(url_for('employees_list'))
@@ -306,15 +324,16 @@ def employee_edit(emp_id):
     return render_template('employee_form.html', employee=emp, mode='edit', settings=get_all_settings())
 
 # ─── ROUTES: API ─────────────────────────────────────────────
-
 @app.route('/api/employees')
 def api_employees():
-    q = request.args.get('q', '').strip()
+    # FIX #4: обрізаємо пошуковий рядок до 100 символів
+    q = request.args.get('q', '').strip()[:100]
     conn = get_db()
+
     # Підрозділ і посада беруться з останнього запису розділу III (Призначення)
     base_select = '''
         SELECT e.id, e.tabelny_nomer, e.prizvyshche, e.imia, e.po_batkovi,
-               a.data          AS data_pryyomu,
+               a.data AS data_pryyomu,
                a.nazva_pidrozdilu AS nazva_pidrozdilu,
                a.profesiya_posada AS posada
         FROM employees e
@@ -329,6 +348,7 @@ def api_employees():
             )
         ) a ON a.employee_id = e.id
     '''
+
     if q:
         like = f'%{q}%'
         rows = conn.execute(base_select + '''
@@ -341,6 +361,7 @@ def api_employees():
         rows = conn.execute(base_select + '''
             ORDER BY e.prizvyshche, e.imia
         ''').fetchall()
+
     return jsonify(rows_to_list(rows))
 
 @app.route('/api/employees', methods=['POST'])
@@ -349,6 +370,7 @@ def api_create_employee():
     errors = validate_employee(data)
     if errors:
         return jsonify({'error': 'validation', 'messages': errors}), 400
+
     now = datetime.now().isoformat()
     conn = get_db()
     c = conn.cursor()
@@ -364,6 +386,7 @@ def api_create_employee():
             full_name = f"{existing['prizvyshche']} {existing['imia']} {existing['po_batkovi'] or ''}".strip()
             return jsonify({'error': 'duplicate_tabelny', 'message': f'Табельний номер {tabelny} вже існує у працівника: {full_name}', 'employee_id': existing['id']}), 409
 
+    # FIX #9: виправлено назву поля grupa_obliku
     c.execute('''INSERT INTO employees (
         tabelny_nomer, data_zapovnennia, nazva_pidpryemstva, kod_edrpou, vyd_roboty,
         prizvyshche, imia, po_batkovi, data_narodzhennia, gender, hromadianstvo, ipn,
@@ -372,7 +395,7 @@ def api_create_employee():
         nazva_pidrozdilu, data_pryyomu,
         data_zvilnennia, prychyna_zvilnennia,
         rodinny_stan, pensiia,
-        grupa_oblikyy, katehoriia_obliku, sklad, viiskove_zvannia,
+        grupa_obliku, katehoriia_obliku, sklad, viiskove_zvannia,
         viiskova_spetsialnist, prydatnist,
         nazva_viiskkomatu_reiestr, nazva_viiskkomatu_faktych, spec_oblik,
         data_pryyomu_naek, dodatkovo, updated_at
@@ -388,11 +411,13 @@ def api_create_employee():
         data.get('nazva_pidrozdilu'), data.get('data_pryyomu'),
         data.get('data_zvilnennia'), data.get('prychyna_zvilnennia'),
         data.get('rodinny_stan'), data.get('pensiia'),
-        data.get('grupa_oblikyy'), data.get('katehoriia_obliku'), data.get('sklad'),
+        # FIX #9: виправлено назву поля
+        data.get('grupa_obliku'), data.get('katehoriia_obliku'), data.get('sklad'),
         data.get('viiskove_zvannia'), data.get('viiskova_spetsialnist'), data.get('prydatnist'),
         data.get('nazva_viiskkomatu_reiestr'), data.get('nazva_viiskkomatu_faktych'),
         data.get('spec_oblik'), data.get('data_pryyomu_naek'), data.get('dodatkovo'), now
     ))
+
     emp_id = c.lastrowid
     _save_education(c, emp_id, data.get('education', []))
     _save_family(c, emp_id, data.get('family', []))
@@ -400,19 +425,21 @@ def api_create_employee():
     _save_appointments(c, emp_id, data.get('appointments', []))
     _save_vacations(c, emp_id, data.get('vacations', []))
     conn.commit()
+
     return jsonify({'id': emp_id, 'status': 'created'}), 201
 
 @app.route('/api/employees/<int:emp_id>', methods=['GET'])
 def api_get_employee(emp_id):
     conn = get_db()
+    # TODO: замінити SELECT * на явні колонки коли додамо фото (issue #6)
     emp = row_to_dict(conn.execute('SELECT * FROM employees WHERE id=?', (emp_id,)).fetchone())
     if not emp:
         return jsonify({'error': 'Not found'}), 404
-    emp['education']    = rows_to_list(conn.execute('SELECT * FROM education    WHERE employee_id=?', (emp_id,)).fetchall())
-    emp['family']       = rows_to_list(conn.execute('SELECT * FROM family       WHERE employee_id=?', (emp_id,)).fetchall())
+    emp['education'] = rows_to_list(conn.execute('SELECT * FROM education WHERE employee_id=?', (emp_id,)).fetchall())
+    emp['family'] = rows_to_list(conn.execute('SELECT * FROM family WHERE employee_id=?', (emp_id,)).fetchall())
     emp['work_history'] = rows_to_list(conn.execute('SELECT * FROM work_history WHERE employee_id=?', (emp_id,)).fetchall())
     emp['appointments'] = rows_to_list(conn.execute('SELECT * FROM appointments WHERE employee_id=? ORDER BY data', (emp_id,)).fetchall())
-    emp['vacations']    = rows_to_list(conn.execute('SELECT * FROM vacations    WHERE employee_id=?', (emp_id,)).fetchall())
+    emp['vacations'] = rows_to_list(conn.execute('SELECT * FROM vacations WHERE employee_id=?', (emp_id,)).fetchall())
     return jsonify(emp)
 
 @app.route('/api/employees/<int:emp_id>', methods=['PUT'])
@@ -421,6 +448,7 @@ def api_update_employee(emp_id):
     errors = validate_employee(data)
     if errors:
         return jsonify({'error': 'validation', 'messages': errors}), 400
+
     now = datetime.now().isoformat()
     conn = get_db()
     c = conn.cursor()
@@ -436,58 +464,73 @@ def api_update_employee(emp_id):
             full_name = f"{existing['prizvyshche']} {existing['imia']} {existing['po_batkovi'] or ''}".strip()
             return jsonify({'error': 'duplicate_tabelny', 'message': f'Табельний номер {tabelny} вже існує у працівника: {full_name}', 'employee_id': existing['id']}), 409
 
-    c.execute('''UPDATE employees SET
-        tabelny_nomer=?, data_zapovnennia=?, nazva_pidpryemstva=?, kod_edrpou=?, vyd_roboty=?,
-        prizvyshche=?, imia=?, po_batkovi=?, data_narodzhennia=?, gender=?, hromadianstvo=?, ipn=?,
-        pasport=?, pasport_vydanyi=?, data_vydachi_pasportu=?, id_karta=?, id_karta_diisna_do=?,
-        adresa_faktychna=?, adresa_reiestratsiya=?,
-        nazva_pidrozdilu=?, data_pryyomu=?,
-        data_zvilnennia=?, prychyna_zvilnennia=?,
-        rodinny_stan=?, pensiia=?,
-        grupa_oblikyy=?, katehoriia_obliku=?, sklad=?, viiskove_zvannia=?,
-        viiskova_spetsialnist=?, prydatnist=?,
-        nazva_viiskkomatu_reiestr=?, nazva_viiskkomatu_faktych=?, spec_oblik=?,
-        data_pryyomu_naek=?, dodatkovo=?, updated_at=?
-    WHERE id=?''', (
-        data.get('tabelny_nomer'), data.get('data_zapovnennia'), data.get('nazva_pidpryemstva'),
-        data.get('kod_edrpou'), data.get('vyd_roboty'),
-        data['prizvyshche'], data['imia'], data.get('po_batkovi'),
-        data.get('data_narodzhennia'), data.get('gender'),
-        data.get('hromadianstvo', 'Українець/ка'), data.get('ipn'),
-        data.get('pasport'), data.get('pasport_vydanyi'), data.get('data_vydachi_pasportu'),
-        data.get('id_karta'), data.get('id_karta_diisna_do'),
-        data.get('adresa_faktychna'), data.get('adresa_reiestratsiya'),
-        data.get('nazva_pidrozdilu'), data.get('data_pryyomu'),
-        data.get('data_zvilnennia'), data.get('prychyna_zvilnennia'),
-        data.get('rodinny_stan'), data.get('pensiia'),
-        data.get('grupa_oblikyy'), data.get('katehoriia_obliku'), data.get('sklad'),
-        data.get('viiskove_zvannia'), data.get('viiskova_spetsialnist'), data.get('prydatnist'),
-        data.get('nazva_viiskkomatu_reiestr'), data.get('nazva_viiskkomatu_faktych'),
-        data.get('spec_oblik'), data.get('data_pryyomu_naek'), data.get('dodatkovo'), now,
-        emp_id
-    ))
-    c.execute('DELETE FROM education    WHERE employee_id=?', (emp_id,))
-    c.execute('DELETE FROM family       WHERE employee_id=?', (emp_id,))
-    c.execute('DELETE FROM work_history WHERE employee_id=?', (emp_id,))
-    c.execute('DELETE FROM appointments WHERE employee_id=?', (emp_id,))
-    c.execute('DELETE FROM vacations    WHERE employee_id=?', (emp_id,))
-    _save_education(c, emp_id, data.get('education', []))
-    _save_family(c, emp_id, data.get('family', []))
-    _save_work_history(c, emp_id, data.get('work_history', []))
-    _save_appointments(c, emp_id, data.get('appointments', []))
-    _save_vacations(c, emp_id, data.get('vacations', []))
-    conn.commit()
+    # FIX #6: транзакційний захист через with conn — при помилці автоматичний rollback
+    try:
+        with conn:
+            # FIX #9: виправлено назву поля grupa_obliku
+            c.execute('''UPDATE employees SET
+                tabelny_nomer=?, data_zapovnennia=?, nazva_pidpryemstva=?, kod_edrpou=?, vyd_roboty=?,
+                prizvyshche=?, imia=?, po_batkovi=?, data_narodzhennia=?, gender=?, hromadianstvo=?, ipn=?,
+                pasport=?, pasport_vydanyi=?, data_vydachi_pasportu=?, id_karta=?, id_karta_diisna_do=?,
+                adresa_faktychna=?, adresa_reiestratsiya=?,
+                nazva_pidrozdilu=?, data_pryyomu=?,
+                data_zvilnennia=?, prychyna_zvilnennia=?,
+                rodinny_stan=?, pensiia=?,
+                grupa_obliku=?, katehoriia_obliku=?, sklad=?, viiskove_zvannia=?,
+                viiskova_spetsialnist=?, prydatnist=?,
+                nazva_viiskkomatu_reiestr=?, nazva_viiskkomatu_faktych=?, spec_oblik=?,
+                data_pryyomu_naek=?, dodatkovo=?, updated_at=?
+                WHERE id=?''', (
+                data.get('tabelny_nomer'), data.get('data_zapovnennia'), data.get('nazva_pidpryemstva'),
+                data.get('kod_edrpou'), data.get('vyd_roboty'),
+                data['prizvyshche'], data['imia'], data.get('po_batkovi'),
+                data.get('data_narodzhennia'), data.get('gender'),
+                data.get('hromadianstvo', 'Українець/ка'), data.get('ipn'),
+                data.get('pasport'), data.get('pasport_vydanyi'), data.get('data_vydachi_pasportu'),
+                data.get('id_karta'), data.get('id_karta_diisna_do'),
+                data.get('adresa_faktychna'), data.get('adresa_reiestratsiya'),
+                data.get('nazva_pidrozdilu'), data.get('data_pryyomu'),
+                data.get('data_zvilnennia'), data.get('prychyna_zvilnennia'),
+                data.get('rodinny_stan'), data.get('pensiia'),
+                # FIX #9: виправлено назву поля
+                data.get('grupa_obliku'), data.get('katehoriia_obliku'), data.get('sklad'),
+                data.get('viiskove_zvannia'), data.get('viiskova_spetsialnist'), data.get('prydatnist'),
+                data.get('nazva_viiskkomatu_reiestr'), data.get('nazva_viiskkomatu_faktych'),
+                data.get('spec_oblik'), data.get('data_pryyomu_naek'), data.get('dodatkovo'), now,
+                emp_id
+            ))
+
+            c.execute('DELETE FROM education WHERE employee_id=?', (emp_id,))
+            c.execute('DELETE FROM family WHERE employee_id=?', (emp_id,))
+            c.execute('DELETE FROM work_history WHERE employee_id=?', (emp_id,))
+            c.execute('DELETE FROM appointments WHERE employee_id=?', (emp_id,))
+            c.execute('DELETE FROM vacations WHERE employee_id=?', (emp_id,))
+
+            _save_education(c, emp_id, data.get('education', []))
+            _save_family(c, emp_id, data.get('family', []))
+            _save_work_history(c, emp_id, data.get('work_history', []))
+            _save_appointments(c, emp_id, data.get('appointments', []))
+            _save_vacations(c, emp_id, data.get('vacations', []))
+
+    except Exception as e:
+        app.logger.error(f'Помилка при оновленні працівника {emp_id}: {e}', exc_info=True)
+        return jsonify({'error': 'Помилка збереження даних', 'detail': str(e)}), 500
+
     return jsonify({'status': 'updated'})
 
 @app.route('/api/employees/<int:emp_id>', methods=['DELETE'])
 def api_delete_employee(emp_id):
     conn = get_db()
-    conn.execute('DELETE FROM employees WHERE id=?', (emp_id,))
+    result = conn.execute('DELETE FROM employees WHERE id=?', (emp_id,))
     conn.commit()
+    # FIX #10: перевіряємо чи запис існував через rowcount
+    if result.rowcount == 0:
+        return jsonify({'error': 'Not found'}), 404
     return jsonify({'status': 'deleted'})
 
 @app.route('/api/employees/<int:emp_id>/prev')
 def api_prev_employee(emp_id):
+    # FIX #8: залишаємо навігацію за id (прийнято рішення)
     conn = get_db()
     row = conn.execute('SELECT id FROM employees WHERE id < ? ORDER BY id DESC LIMIT 1', (emp_id,)).fetchone()
     return jsonify({'id': row['id'] if row else None})
@@ -520,7 +563,6 @@ def api_save_settings():
     return jsonify({'status': 'ok'})
 
 # ─── HELPERS: RELATED DATA ───────────────────────────────────
-
 def _save_education(c, emp_id, items):
     for e in items:
         c.execute('''INSERT INTO education (
@@ -568,14 +610,12 @@ def _save_vacations(c, emp_id, items):
         ))
 
 # ─── ERROR HANDLING ──────────────────────────────────────────
-
 @app.errorhandler(Exception)
 def handle_exception(e):
     app.logger.error(f'Unhandled exception: {e}', exc_info=True)
     return jsonify({'error': 'Внутрішня помилка сервера', 'detail': str(e)}), 500
 
 # ─── STARTUP ─────────────────────────────────────────────────
-
 def setup_logging():
     import logging
     log_path = os.path.join(DATA_DIR, 'vk_errors.log')
@@ -586,14 +626,20 @@ def setup_logging():
     app.logger.addHandler(handler)
     app.logger.setLevel(logging.ERROR)
 
-def open_browser():
+def open_browser(host):
     import time
     time.sleep(1)
-    webbrowser.open('http://127.0.0.1:5000')
+    webbrowser.open(f'http://{host}:5000')
 
 if __name__ == '__main__':
     setup_logging()
     init_db()
-    if not os.environ.get('NO_BROWSER'):
-        threading.Thread(target=open_browser, daemon=True).start()
-    app.run(debug=False, port=5000, use_reloader=False)
+
+    # FIX #14: HOST визначає і мережевий режим і чи відкривати браузер
+    # Локально: python app.py  -> відкриє браузер на 127.0.0.1
+    # Мережево: HOST=0.0.0.0 python app.py -> не відкриває браузер
+    host = os.environ.get('HOST', '127.0.0.1')
+    if host in ('127.0.0.1', 'localhost'):
+        threading.Thread(target=open_browser, args=(host,), daemon=True).start()
+
+    app.run(debug=False, host=host, port=5000, use_reloader=False)
