@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}Налаштування{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <span class="topbar-title">⚙️ Налаштування</span>
+</div>
+
+<div class="content animate-in">
+
+  <div class="card" style="max-width:680px">
+    <div class="section-title">Реквізити підприємства</div>
+    <div class="card-body">
+      <p style="font-size:13px;color:var(--text2);margin-bottom:16px">
+        Ці дані автоматично підставляються у кожну нову картку П-2.
+      </p>
+
+      <div class="form-grid cols1">
+
+        <div class="form-group">
+          <label>Повна назва підприємства (установи, організації)</label>
+          <input type="text" id="nazva_pidpryemstva"
+            value="{{ settings.nazva_pidpryemstva or '' }}"
+            placeholder='АТ "НАЕК "ЕНЕРГОАТОМ" ВП "АПІ"'>
+          <span style="font-size:11px;color:var(--text3);margin-top:2px">
+            Відображається у шапці картки П-2
+          </span>
+        </div>
+
+        <div class="form-group">
+          <label>Скорочена назва (для бічного меню)</label>
+          <input type="text" id="nazva_pidpryemstva_short"
+            value="{{ settings.nazva_pidpryemstva_short or '' }}"
+            placeholder='ВП "АПІ"'
+            maxlength="40">
+          <span style="font-size:11px;color:var(--text3);margin-top:2px">
+            Відображається у лівій панелі замість "Відділ кадрів"
+          </span>
+        </div>
+
+        <div class="form-group" style="max-width:220px">
+          <label>Код ЄДРПОУ</label>
+          <input type="text" id="kod_edrpou"
+            value="{{ settings.kod_edrpou or '' }}"
+            placeholder="24584661"
+            maxlength="10">
+        </div>
+
+      </div>
+
+      <div style="margin-top:20px;display:flex;align-items:center;gap:12px">
+        <button class="btn btn-primary-dark" onclick="saveSettings()">💾 Зберегти налаштування</button>
+        <span id="save-status" style="font-size:13px;color:var(--success);display:none">✓ Збережено</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Інформаційна картка -->
+  <div class="card" style="max-width:680px;border-left:3px solid var(--navy)">
+    <div class="card-header">
+      <span class="card-title">ℹ️ Про програму</span>
+    </div>
+    <div class="card-body">
+      <div class="form-grid cols1">
+        <div class="field-row">
+          <span class="field-lbl">Програма</span>
+          <span class="field-val">Відділ кадрів — Картки П-2</span>
+        </div>
+        <div class="field-row">
+          <span class="field-lbl">Версія</span>
+          <span class="field-val">1.0.0</span>
+        </div>
+        <div class="field-row">
+          <span class="field-lbl">Ліцензія</span>
+          <span class="field-val">GPL v3</span>
+        </div>
+        <div class="field-row">
+          <span class="field-lbl">База даних</span>
+          <span class="field-val" id="db-info">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function saveSettings() {
+  const data = {
+    nazva_pidpryemstva:       document.getElementById('nazva_pidpryemstva').value.trim(),
+    nazva_pidpryemstva_short: document.getElementById('nazva_pidpryemstva_short').value.trim(),
+    kod_edrpou:               document.getElementById('kod_edrpou').value.trim(),
+  };
+
+  const res = await fetch('/api/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+
+  if (res.ok) {
+    // Оновити назву в сайдбарі одразу
+    const nameEl = document.getElementById('sidebar-company-name');
+    if (nameEl) {
+      nameEl.textContent = data.nazva_pidpryemstva_short || data.nazva_pidpryemstva || 'Відділ кадрів';
+    }
+    showToast('Налаштування збережено ✓');
+    const status = document.getElementById('save-status');
+    status.style.display = 'inline';
+    setTimeout(() => { status.style.display = 'none'; }, 3000);
+  } else {
+    showToast('Помилка збереження', 'error');
+  }
+}
+
+// Показати кількість карток в базі
+fetch('/api/stats').then(r => r.json()).then(d => {
+  document.getElementById('db-info').textContent = `${d.total} карток П-2`;
+});
+
+// Enter для збереження
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) saveSettings();
+});
+</script>
+{% endblock %}

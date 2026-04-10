@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Всі працівники{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <span class="topbar-title">👥 Список працівників</span>
+  <div class="topbar-actions">
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="search-input" placeholder="Пошук по ПІБ, таб. №, підрозділу, посаді…" oninput="doSearch(this.value)">
+    </div>
+    <a href="/employees/new" class="btn btn-primary">➕ Новий працівник</a>
+  </div>
+</div>
+
+<div class="content animate-in">
+
+  <!-- Stats row -->
+  <div style="display:flex;gap:10px;margin-bottom:16px">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 18px;display:flex;align-items:center;gap:12px;border-left:3px solid var(--navy)">
+      <div>
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text3)">Всього працівників</div>
+        <div style="font-size:22px;font-weight:700;color:var(--navy);font-variant-numeric:tabular-nums" id="total-count">—</div>
+      </div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 18px;display:flex;align-items:center;gap:12px;border-left:3px solid #16a34a">
+      <div>
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text3)">Знайдено</div>
+        <div style="font-size:22px;font-weight:700;color:#16a34a;font-variant-numeric:tabular-nums" id="found-count">—</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table id="emp-table">
+      <thead>
+        <tr>
+          <th style="width:90px">Таб. №</th>
+          <th>ПІБ</th>
+          <th>Підрозділ</th>
+          <th>Посада</th>
+          <th style="width:120px">Призначений з</th>
+          <th style="width:110px"></th>
+        </tr>
+      </thead>
+      <tbody id="emp-tbody">
+        <tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text3)">Завантаження…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allEmployees = [];
+
+async function loadEmployees(q='') {
+  const url = q ? `/api/employees?q=${encodeURIComponent(q)}` : '/api/employees';
+  const res = await fetch(url);
+  allEmployees = await res.json();
+  renderTable(allEmployees);
+  fetch('/api/stats').then(r=>r.json()).then(d=>{
+    document.getElementById('sidebar-total').textContent = d.total;
+    document.getElementById('total-count').textContent = d.total;
+  });
+  document.getElementById('found-count').textContent = allEmployees.length;
+}
+
+function esc(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function dash(str) {
+  return str ? esc(str) : '<span style="color:var(--text3)">—</span>';
+}
+
+function renderTable(rows) {
+  const tbody = document.getElementById('emp-tbody');
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="6">
+      <div class="empty-state">
+        <div class="icon">🔍</div>
+        <p>Нічого не знайдено</p>
+      </div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(e => {
+    const fullName = [e.prizvyshche, e.imia, e.po_batkovi||''].join(' ').trim();
+    return `
+    <tr onclick="location.href='/employees/${e.id}'" style="cursor:pointer">
+      <td class="td-mono">${dash(e.tabelny_nomer)}</td>
+      <td class="td-name">${esc(fullName)}</td>
+      <td>${dash(e.nazva_pidrozdilu)}</td>
+      <td>${dash(e.posada)}</td>
+      <td class="td-mono">${formatDate(e.data_pryyomu)}</td>
+      <td onclick="event.stopPropagation()">
+        <div style="display:flex;gap:5px;justify-content:flex-end">
+          <a href="/employees/${e.id}/edit" class="btn btn-light btn-sm" title="Редагувати">✏️</a>
+          <button class="btn btn-danger btn-sm"
+            data-id="${e.id}"
+            data-name="${esc(fullName)}"
+            onclick="event.stopPropagation();handleDelete(this)"
+            title="Видалити">🗑</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function formatDate(d) {
+  if (!d) return '<span style="color:var(--text3)">—</span>';
+  const parts = d.split('-');
+  if (parts.length !== 3) return d;
+  return `${parts[2]}.${parts[1]}.${parts[0]}`;
+}
+
+let searchTimer;
+function doSearch(val) {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => loadEmployees(val), 300);
+}
+
+function handleDelete(btn) {
+  const id   = btn.dataset.id;
+  const name = btn.dataset.name;
+  showConfirm('Видалити картку', `Видалити картку "${name}"? Цю дію не можна скасувати.`, async () => {
+    await fetch(`/api/employees/${id}`, {method:'DELETE'});
+    showToast('Картку видалено');
+    loadEmployees(document.getElementById('search-input').value);
+  });
+}
+
+loadEmployees();
+</script>
+{% endblock %}

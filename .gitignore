@@ -1,0 +1,7 @@
+vk.db
+vk_errors.log
+__pycache__/
+dist/
+build/
+venv/
+*.pyc

@@ -1,0 +1,786 @@
+{% extends "base.html" %}
+{% block title %}{% if mode == 'new' %}Новий працівник{% else %}{{ employee.prizvyshche }} {{ employee.imia }}{% endif %}{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0">
+    <a href="/employees" class="btn btn-secondary btn-sm">← Назад</a>
+    <span class="topbar-title" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+      {% if mode == 'new' %}Новий працівник
+      {% elif mode == 'edit' %}Редагування: {{ employee.prizvyshche }} {{ employee.imia }}
+      {% else %}{{ employee.prizvyshche }} {{ employee.imia }} {{ employee.po_batkovi or '' }}
+      {% endif %}
+    </span>
+  </div>
+  <div class="topbar-actions">
+    {% if mode != 'new' %}
+    <div class="nav-arrows">
+      <button class="btn btn-secondary btn-icon btn-sm" id="btn-prev" title="Попередній">◀</button>
+      <span class="nav-counter" id="nav-counter"></span>
+      <button class="btn btn-secondary btn-icon btn-sm" id="btn-next" title="Наступний">▶</button>
+    </div>
+    {% endif %}
+    {% if mode == 'view' %}
+      <a href="/employees/{{ employee.id }}/edit" class="btn btn-primary">✏️ Редагувати</a>
+      <button class="btn btn-secondary" onclick="window.print()">🖨️ Друк</button>
+      <button class="btn btn-danger" onclick="deleteEmployee({{ employee.id }},'{{ employee.prizvyshche }} {{ employee.imia }}')">🗑 Видалити</button>
+    {% elif mode == 'edit' %}
+      <button class="btn btn-primary" onclick="saveEmployee()">💾 Зберегти</button>
+      <a href="/employees/{{ employee.id }}" class="btn btn-secondary">✕ Скасувати</a>
+    {% else %}
+      <button class="btn btn-primary" onclick="saveEmployee()">💾 Зберегти</button>
+      <a href="/employees" class="btn btn-secondary">✕ Скасувати</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="content animate-in">
+
+  <div class="tabs">
+    <div class="tab active" data-tab="main">І. Загальні відомості</div>
+    <div class="tab" data-tab="military">ІІ. Військовий облік</div>
+    <div class="tab" data-tab="appointments">ІІІ. Призначення</div>
+    <div class="tab" data-tab="vacation">IV. Відпустки</div>
+    <div class="tab" data-tab="extra">Додатково</div>
+  </div>
+
+  <!-- ══ TAB: MAIN ══ -->
+  <div class="tab-content active" data-tab="main">
+
+    <div class="card">
+      <div class="section-title">Відомості про підприємство</div>
+      <div class="card-body">
+        <div class="form-grid cols3">
+          <div class="form-group span2">
+            <label>Найменування підприємства (установи, організації)</label>
+            <input type="text" id="nazva_pidpryemstva" value="{{ employee.nazva_pidpryemstva or settings.nazva_pidpryemstva if employee else settings.nazva_pidpryemstva }}" readonly style="background:var(--navy-lt);color:var(--navy);font-weight:600;">
+          </div>
+          <div class="form-group">
+            <label>Код ЄДРПОУ</label>
+            <input type="text" id="kod_edrpou" value="{{ employee.kod_edrpou or settings.kod_edrpou if employee else settings.kod_edrpou }}" readonly style="background:var(--navy-lt);color:var(--navy);font-weight:600;">
+          </div>
+          <div class="form-group">
+            <label>Дата заповнення</label>
+            <input type="date" id="data_zapovnennia" value="{{ employee.data_zapovnennia or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group">
+            <label>Табельний номер</label>
+            <input type="text" id="tabelny_nomer" value="{{ employee.tabelny_nomer or '' if employee else '' }}" placeholder="0001" maxlength="4" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group">
+            <label>Вид роботи</label>
+            <select id="vyd_roboty" {% if mode=='view' %}disabled{% endif %}>
+              <option value="">— оберіть —</option>
+              {% for v in ['Основна','За сумісництвом'] %}
+              <option value="{{ v }}" {{ 'selected' if employee and employee.vyd_roboty==v else '' }}>{{ v }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">І. Загальні відомості</div>
+      <div class="card-body">
+
+        <div class="form-grid cols3" style="margin-bottom:12px">
+          <div class="form-group">
+            <label>1. Прізвище *</label>
+            <input type="text" id="prizvyshche" value="{{ employee.prizvyshche if employee else '' }}" placeholder="Іваненко" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group">
+            <label>Ім'я *</label>
+            <input type="text" id="imia" value="{{ employee.imia if employee else '' }}" placeholder="Іван" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group">
+            <label>По батькові</label>
+            <input type="text" id="po_batkovi" value="{{ employee.po_batkovi or '' if employee else '' }}" placeholder="Іванович" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+        </div>
+
+        <div class="form-grid cols3" style="margin-bottom:12px">
+          <div class="form-group">
+            <label>2. Дата народження</label>
+            <input type="date" id="data_narodzhennia" value="{{ employee.data_narodzhennia or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group">
+            <label>Стать</label>
+            <select id="gender" {% if mode=='view' %}disabled{% endif %}>
+              <option value="">— оберіть —</option>
+              <option value="Чоловіча" {{ 'selected' if employee and employee.gender=='Чоловіча' else '' }}>Чоловіча</option>
+              <option value="Жіноча"   {{ 'selected' if employee and employee.gender=='Жіноча'   else '' }}>Жіноча</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>3. Громадянство</label>
+            <input type="text" id="hromadianstvo" value="{{ employee.hromadianstvo or 'Українець/ка' if employee else 'Українець/ка' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+        </div>
+
+        <!-- 4. Освіта -->
+        <div class="section-title" style="margin-bottom:8px">4. Освіта</div>
+        <div style="overflow-x:auto;margin-bottom:6px">
+          <table class="dynamic-table">
+            <thead>
+              <tr>
+                <th>Назва освітнього закладу</th>
+                <th style="width:80px">Диплом серія</th>
+                <th style="width:90px">Номер</th>
+                <th style="width:80px">Рік закінч.</th>
+                {% if mode != 'view' %}<th style="width:36px"></th>{% endif %}
+              </tr>
+              <tr style="background:var(--navy-lt)">
+                <th style="color:var(--navy)">Спеціальність (професія) за дипломом</th>
+                <th colspan="2" style="color:var(--navy)">Кваліфікація за дипломом (свідоцтвом)</th>
+                <th style="color:var(--navy)">Форма навчання</th>
+                {% if mode != 'view' %}<th></th>{% endif %}
+              </tr>
+            </thead>
+            <tbody id="edu-tbody"></tbody>
+          </table>
+        </div>
+        {% if mode != 'view' %}
+        <button class="btn btn-light btn-sm" style="margin-bottom:16px" onclick="addEduRow()">+ Додати заклад освіти</button>
+        {% endif %}
+
+        <!-- 5. Після диплом -->
+        <div class="section-title" style="margin-bottom:8px">5. Післядипломна професійна підготовка</div>
+        <div style="overflow-x:auto;margin-bottom:6px">
+          <table class="dynamic-table">
+            <thead><tr>
+              <th style="width:130px">Тип</th>
+              <th>Назва освітнього, наукового закладу</th>
+              <th>Диплом, номер, дата видачі</th>
+              <th style="width:80px">Рік закінч.</th>
+              <th>Науковий ступінь, учене звання</th>
+              {% if mode != 'view' %}<th style="width:36px"></th>{% endif %}
+            </tr></thead>
+            <tbody id="pislya-tbody"></tbody>
+          </table>
+        </div>
+        {% if mode != 'view' %}
+        <button class="btn btn-light btn-sm" style="margin-bottom:16px" onclick="addPislyaRow()">+ Додати</button>
+        {% endif %}
+
+        <!-- 6. Останнє місце роботи -->
+        <div class="form-grid cols1" style="margin-bottom:12px">
+          <div class="form-group">
+            <label>6. Останнє місце роботи, посада</label>
+            <input type="text" id="nazva_pidrozdilu" value="{{ employee.nazva_pidrozdilu or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+        </div>
+
+        <!-- 7-8. Стаж, звільнення -->
+        <div class="form-grid cols3" style="margin-bottom:12px">
+          <div class="form-group">
+            <label>7. Стаж роботи з (дата прийому)</label>
+            <input type="date" id="data_pryyomu" value="{{ employee.data_pryyomu or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group">
+            <label>8. Дата звільнення</label>
+            <input type="date" id="data_zvilnennia" value="{{ employee.data_zvilnennia or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group">
+            <label>Причина звільнення</label>
+            <input type="text" id="prychyna_zvilnennia" value="{{ employee.prychyna_zvilnennia or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+        </div>
+
+        <!-- 9-10. Пенсія, стан -->
+        <div class="form-grid" style="margin-bottom:12px">
+          <div class="form-group">
+            <label>9. Відомості про отримання пенсії</label>
+            <input type="text" id="pensiia" value="{{ employee.pensiia or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group">
+            <label>10. Родинний стан</label>
+            <select id="rodinny_stan" {% if mode=='view' %}disabled{% endif %}>
+              <option value="">— оберіть —</option>
+              {% for s in ['Одружений/а','Неодружений/а','Розлучений/а','Вдівець/вдова'] %}
+              <option value="{{ s }}" {{ 'selected' if employee and employee.rodinny_stan==s else '' }}>{{ s }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <!-- Склад сім'ї -->
+        <div class="section-title" style="margin-bottom:8px">Склад сім'ї</div>
+        <table class="dynamic-table" style="margin-bottom:6px">
+          <thead><tr>
+            <th style="width:180px">Склад сім'ї</th>
+            <th>П.І.Б.</th>
+            <th style="width:130px">Рік народження</th>
+            {% if mode != 'view' %}<th style="width:36px"></th>{% endif %}
+          </tr></thead>
+          <tbody id="family-tbody"></tbody>
+        </table>
+        {% if mode != 'view' %}
+        <button class="btn btn-light btn-sm" style="margin-bottom:16px" onclick="addFamilyRow()">+ Додати члена сім'ї</button>
+        {% endif %}
+
+        <!-- 11-12. Адреса -->
+        <div class="form-grid cols1" style="margin-bottom:12px">
+          <div class="form-group">
+            <label>11. Місце фактичного проживання</label>
+            <input type="text" id="adresa_faktychna" value="{{ employee.adresa_faktychna or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group">
+            <label>12. Місце проживання за державною реєстрацією</label>
+            <input type="text" id="adresa_reiestratsiya" value="{{ employee.adresa_reiestratsiya or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+        </div>
+
+        <!-- Паспорт / ID -->
+        <div class="form-grid cols3">
+          <div class="form-group">
+            <label>Паспорт: серія та №</label>
+            <input type="text" id="pasport" value="{{ employee.pasport or '' if employee else '' }}" placeholder="АА 000000" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group span2">
+            <label>Виданий ким</label>
+            <input type="text" id="pasport_vydanyi" value="{{ employee.pasport_vydanyi or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group">
+            <label>Дата видачі паспорта</label>
+            <input type="date" id="data_vydachi_pasportu" value="{{ employee.data_vydachi_pasportu or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group">
+            <label>ID картка №</label>
+            <input type="text" id="id_karta" value="{{ employee.id_karta or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group">
+            <label>Дійсна до</label>
+            <input type="date" id="id_karta_diisna_do" value="{{ employee.id_karta_diisna_do or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group span2">
+            <label>Індивідуальний ідентифікаційний номер (ІПН)</label>
+            <input type="text" id="ipn" value="{{ employee.ipn or '' if employee else '' }}" placeholder="0000000000" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Попередні місця роботи -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Попередні місця роботи</span>
+        {% if mode != 'view' %}<button class="btn btn-light btn-sm" onclick="addWorkRow()">+ Додати рядок</button>{% endif %}
+      </div>
+      <div style="overflow-x:auto">
+        <table class="dynamic-table">
+          <thead><tr>
+            <th style="width:100px">З (дата)</th>
+            <th style="width:100px">По (дата)</th>
+            <th>Організація / підрозділ</th>
+            <th>Посада</th>
+            <th style="width:100px">Наказ №</th>
+            <th>Причина звільнення</th>
+            {% if mode != 'view' %}<th style="width:36px"></th>{% endif %}
+          </tr></thead>
+          <tbody id="work-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /tab main -->
+
+  <!-- ══ TAB: MILITARY ══ -->
+  <div class="tab-content" data-tab="military">
+    <div class="card">
+      <div class="section-title">ІІ. Відомості про військовий облік</div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Група обліку</label>
+            <input type="text" id="grupa_oblikyy" value="{{ employee.grupa_oblikyy or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group">
+            <label>Придатність до військової служби</label>
+            <select id="prydatnist" {% if mode=='view' %}disabled{% endif %}>
+              <option value="">— оберіть —</option>
+              {% for p in ['Придатний/а','Обмежено придатний/а','Непридатний/а','Не військовозобов\'язаний/а'] %}
+              <option value="{{ p }}" {{ 'selected' if employee and employee.prydatnist==p else '' }}>{{ p }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Категорія обліку</label>
+            <input type="text" id="katehoriia_obliku" value="{{ employee.katehoriia_obliku or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group">
+            <label>Назва райвійськкомату за реєстрацією</label>
+            <input type="text" id="nazva_viiskkomatu_reiestr" value="{{ employee.nazva_viiskkomatu_reiestr or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group">
+            <label>Склад</label>
+            <input type="text" id="sklad" value="{{ employee.sklad or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group">
+            <label>Назва райвійськкомату за проживанням</label>
+            <input type="text" id="nazva_viiskkomatu_faktych" value="{{ employee.nazva_viiskkomatu_faktych or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group">
+            <label>Військове звання</label>
+            <input type="text" id="viiskove_zvannia" value="{{ employee.viiskove_zvannia or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group">
+            <label>Перебування на спеціальному обліку</label>
+            <input type="text" id="spec_oblik" value="{{ employee.spec_oblik or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group span2">
+            <label>Військово-облікова спеціальність №</label>
+            <input type="text" id="viiskova_spetsialnist" value="{{ employee.viiskova_spetsialnist or '' if employee else '' }}" {% if mode=='view' %}readonly{% endif %}>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ TAB: APPOINTMENTS ══ -->
+  <div class="tab-content" data-tab="appointments">
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">ІІІ. Призначення і переведення</span>
+        {% if mode != 'view' %}<button class="btn btn-light btn-sm" onclick="addAppointmentRow()">+ Додати рядок</button>{% endif %}
+      </div>
+      <div style="overflow-x:auto">
+        <table class="dynamic-table">
+          <thead><tr>
+            <th style="width:110px">Дата</th>
+            <th style="width:160px">Назва структурного підрозділу (код)</th>
+            <th>Професія, посада назва</th>
+            <th style="width:180px">Наказ №</th>
+            {% if mode != 'view' %}<th style="width:36px"></th>{% endif %}
+          </tr></thead>
+          <tbody id="appointments-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ TAB: VACATION ══ -->
+  <div class="tab-content" data-tab="vacation">
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">IV. Відпустки</span>
+        {% if mode != 'view' %}<button class="btn btn-light btn-sm" onclick="addVacRow()">+ Додати рядок</button>{% endif %}
+      </div>
+      <div style="overflow-x:auto">
+        <table class="dynamic-table">
+          <thead><tr>
+            <th>Вид відпустки</th>
+            <th>За який період</th>
+            <th style="width:105px">Дата початку</th>
+            <th style="width:105px">Дата закінч.</th>
+            <th style="width:75px">Календ. днів</th>
+            <th style="width:55px">Днів</th>
+            <th style="width:100px">Наказ №</th>
+            {% if mode != 'view' %}<th style="width:36px"></th>{% endif %}
+          </tr></thead>
+          <tbody id="vac-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ TAB: EXTRA ══ -->
+  <div class="tab-content" data-tab="extra">
+    <div class="card">
+      <div class="section-title">Додаткові відомості про працівника</div>
+      <div class="card-body">
+
+        <div class="form-grid cols3" style="margin-bottom:16px">
+          <div class="form-group">
+            <label>Дата прийому в НАЕК</label>
+            <input type="date" id="data_pryyomu_naek"
+              value="{{ employee.data_pryyomu_naek or '' if employee else '' }}"
+              {% if mode=='view' %}readonly{% endif %}>
+          </div>
+          <div class="form-group span2">
+            <label>Неперервний стаж в НАЕК</label>
+            <input type="text" id="stazh_naek_display" readonly
+              style="background:var(--navy-lt);color:var(--navy);font-weight:600;cursor:default;"
+              placeholder="Заповніть дату прийому в НАЕК">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Додаткові відомості</label>
+          <textarea id="dodatkovo" rows="6" {% if mode=='view' %}readonly{% endif %}>{{ employee.dodatkovo or '' if employee else '' }}</textarea>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const MODE    = '{{ mode }}';
+const EMP_ID  = {{ employee.id if employee else 'null' }};
+const READONLY = MODE === 'view';
+
+async function loadRelated() {
+  if (!EMP_ID) return;
+  const data = await fetch(`/api/employees/${EMP_ID}`).then(r => r.json());
+  renderEdu(data.education           || []);
+  renderPislya(data.education        || []);
+  renderFamily(data.family           || []);
+  renderWork(data.work_history       || []);
+  renderAppointments(data.appointments || []);
+  renderVac(data.vacations           || []);
+}
+
+async function setupNav() {
+  if (!EMP_ID) return;
+  const [prev, next] = await Promise.all([
+    fetch(`/api/employees/${EMP_ID}/prev`).then(r => r.json()),
+    fetch(`/api/employees/${EMP_ID}/next`).then(r => r.json()),
+  ]);
+  const bp = document.getElementById('btn-prev');
+  const bn = document.getElementById('btn-next');
+  if (bp) {
+    bp.disabled = !prev.id;
+    bn.disabled = !next.id;
+    bp.onclick = () => { if (prev.id) location.href = `/employees/${prev.id}${MODE === 'edit' ? '/edit' : ''}`; };
+    bn.onclick = () => { if (next.id) location.href = `/employees/${next.id}${MODE === 'edit' ? '/edit' : ''}`; };
+  }
+}
+
+function collectData() {
+  const v = id => document.getElementById(id)?.value || null;
+  return {
+    tabelny_nomer:             padTabelny(v('tabelny_nomer')),
+    data_zapovnennia:          v('data_zapovnennia'),
+    nazva_pidpryemstva:        v('nazva_pidpryemstva'),
+    kod_edrpou:                v('kod_edrpou'),
+    vyd_roboty:                v('vyd_roboty'),
+    prizvyshche:               document.getElementById('prizvyshche').value.trim(),
+    imia:                      document.getElementById('imia').value.trim(),
+    po_batkovi:                v('po_batkovi'),
+    data_narodzhennia:         v('data_narodzhennia'),
+    gender:                    v('gender'),
+    hromadianstvo:             v('hromadianstvo'),
+    ipn:                       v('ipn'),
+    pasport:                   v('pasport'),
+    pasport_vydanyi:           v('pasport_vydanyi'),
+    data_vydachi_pasportu:     v('data_vydachi_pasportu'),
+    id_karta:                  v('id_karta'),
+    id_karta_diisna_do:        v('id_karta_diisna_do'),
+    adresa_faktychna:          v('adresa_faktychna'),
+    adresa_reiestratsiya:      v('adresa_reiestratsiya'),
+    nazva_pidrozdilu:          v('nazva_pidrozdilu'),
+    data_pryyomu:              v('data_pryyomu'),
+    data_zvilnennia:           v('data_zvilnennia'),
+    prychyna_zvilnennia:       v('prychyna_zvilnennia'),
+    rodinny_stan:              v('rodinny_stan'),
+    pensiia:                   v('pensiia'),
+    grupa_oblikyy:             v('grupa_oblikyy'),
+    katehoriia_obliku:         v('katehoriia_obliku'),
+    sklad:                     v('sklad'),
+    viiskove_zvannia:          v('viiskove_zvannia'),
+    viiskova_spetsialnist:     v('viiskova_spetsialnist'),
+    prydatnist:                v('prydatnist'),
+    nazva_viiskkomatu_reiestr: v('nazva_viiskkomatu_reiestr'),
+    nazva_viiskkomatu_faktych: v('nazva_viiskkomatu_faktych'),
+    spec_oblik:                v('spec_oblik'),
+    data_pryyomu_naek:         v('data_pryyomu_naek'),
+    dodatkovo:                 v('dodatkovo'),
+    education:    collectEduRows(),
+    family:       collectRows('family-tbody',       ['relationship','full_name','birth_year']),
+    work_history: collectRows('work-tbody',         ['start_date','end_date','nazva_pidrozdilu','posada','nakaz','prychyna_zvilnennia']),
+    appointments: collectRows('appointments-tbody', ['data','nazva_pidrozdilu','profesiya_posada','nakaz_nomer']),
+    vacations:    collectRows('vac-tbody',          ['typ','za_yakyi_period','start_date','end_date','calendar_days','days','nakaz']),
+  };
+}
+
+function collectRows(tbodyId, fields) {
+  const tbody = document.getElementById(tbodyId);
+  if (!tbody) return [];
+  return [...tbody.querySelectorAll('tr')].map(tr => {
+    const obj = {};
+    fields.forEach((f, i) => { obj[f] = tr.cells[i]?.querySelector('input,select')?.value || null; });
+    return obj;
+  }).filter(r => Object.values(r).some(v => v));
+}
+
+function collectEduRows() {
+  const rows = [];
+  // Основна освіта — парні рядки
+  const allTr = [...document.querySelectorAll('#edu-tbody tr')];
+  for (let i = 0; i < allTr.length; i += 2) {
+    const tr1 = allTr[i];
+    const tr2 = allTr[i + 1];
+    if (!tr1) break;
+    const c1 = [...tr1.querySelectorAll('input,select')];
+    const c2 = tr2 ? [...tr2.querySelectorAll('input,select')] : [];
+    const r = {
+      zaklad_nazva:   c1[0]?.value || null,
+      dyplom_seriya:  c1[1]?.value || null,
+      dyplom_nomer:   c1[2]?.value || null,
+      rik_zakinch:    c1[3]?.value || null,
+      spetsialnist:   c2[0]?.value || null,
+      kvalifikatsiia: c2[1]?.value || null,
+      forma_navch:    c2[2]?.value || null,
+    };
+    if (Object.values(r).some(v => v)) rows.push(r);
+  }
+  // Після диплом
+  document.querySelectorAll('#pislya-tbody tr').forEach(tr => {
+    const c = [...tr.querySelectorAll('input,select')];
+    if (c.some(x => x.value)) {
+      rows.push({
+        pislyadyplomna_typ:  c[0]?.value || null,
+        pislyadyplomna_zakl: c[1]?.value || null,
+        pislyadyplomna_dypl: c[2]?.value || null,
+        pislyadyplomna_rik:  c[3]?.value || null,
+        naukovyi_stupin:     c[4]?.value || null,
+      });
+    }
+  });
+  return rows;
+}
+
+async function saveEmployee() {
+  const data = collectData();
+  if (!data.prizvyshche || !data.imia) { showToast('Заповніть прізвище та ім\'я!', 'error'); return; }
+  const url    = EMP_ID ? `/api/employees/${EMP_ID}` : '/api/employees';
+  const method = EMP_ID ? 'PUT' : 'POST';
+  const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+  const result = await res.json();
+  if (res.ok) {
+    showToast('Збережено ✓');
+    setTimeout(() => { location.href = `/employees/${result.id || EMP_ID}`; }, 700);
+  } else if (res.status === 409 && result.error === 'duplicate_tabelny') {
+    const field = document.getElementById('tabelny_nomer');
+    if (field) {
+      field.style.borderColor = 'var(--danger)';
+      field.style.boxShadow = '0 0 0 3px rgba(220,38,38,.15)';
+      setTimeout(() => { field.style.borderColor = ''; field.style.boxShadow = ''; }, 4000);
+    }
+    showToast('⚠️ ' + result.message, 'error');
+  } else {
+    showToast('Помилка збереження', 'error');
+  }
+}
+
+async function deleteEmployee(id, name) {
+  showConfirm('Видалити картку', `Видалити картку "${name}"? Цю дію не можна скасувати.`, async () => {
+    await fetch(`/api/employees/${id}`, { method: 'DELETE' });
+    showToast('Картку видалено');
+    setTimeout(() => location.href = '/employees', 700);
+  });
+}
+
+function makeDelBtn(tr) {
+  const btn = document.createElement('button');
+  btn.className = 'btn btn-danger btn-icon btn-sm';
+  btn.textContent = '✕';
+  btn.type = 'button';
+  btn.onclick = () => tr.remove();
+  return btn;
+}
+function inp(type = 'text', placeholder = '', value = '') {
+  const ro = READONLY ? ' readonly' : '';
+  const bg = READONLY ? ' style="background:var(--surface2);color:var(--text2);cursor:default;border-color:var(--border);"' : '';
+  return `<input type="${type}" value="${String(value||'').replace(/"/g,'&quot;')}" placeholder="${placeholder}"${ro}${bg}>`;
+}
+function sel(opts, val = '') {
+  const dis = READONLY ? ' disabled' : '';
+  return `<select${dis}>${opts.map(o => `<option value="${o}" ${o===val?'selected':''}>${o||'— оберіть —'}</option>`).join('')}</select>`;
+}
+
+// Освіта — подвійний рядок
+function addEduRow(d = {}) {
+  const tbody = document.getElementById('edu-tbody');
+  const forms = ['','Денна','Вечірня','Заочна','Дистанційна'];
+
+  const tr1 = document.createElement('tr');
+  tr1.innerHTML = `
+    <td>${inp('text','Назва закладу',d.zaklad_nazva||'')}</td>
+    <td>${inp('text','Серія',d.dyplom_seriya||'')}</td>
+    <td>${inp('text','000000',d.dyplom_nomer||'')}</td>
+    <td>${inp('text','2020',d.rik_zakinch||'')}</td>
+    ${READONLY?'':'<td rowspan="2" style="vertical-align:middle;text-align:center"></td>'}`;
+
+  const tr2 = document.createElement('tr');
+  tr2.style.background = 'var(--navy-lt)';
+  tr2.innerHTML = `
+    <td>${inp('text','Спеціальність',d.spetsialnist||'')}</td>
+    <td colspan="2">${inp('text','Кваліфікація',d.kvalifikatsiia||'')}</td>
+    <td>${sel(forms,d.forma_navch||'')}</td>`;
+
+  if (!READONLY) {
+    const delCell = tr1.lastElementChild;
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-danger btn-icon btn-sm';
+    btn.textContent = '✕';
+    btn.type = 'button';
+    btn.onclick = () => { tr1.remove(); tr2.remove(); };
+    delCell.appendChild(btn);
+  }
+  tbody.appendChild(tr1);
+  tbody.appendChild(tr2);
+}
+function renderEdu(rows) { rows.filter(r => !r.pislyadyplomna_typ).forEach(r => addEduRow(r)); }
+
+function addPislyaRow(d = {}) {
+  const types = ['','Аспірантура',"Ад'юнктура",'Докторантура'];
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td>${sel(types,d.pislyadyplomna_typ||'')}</td>
+    <td>${inp('text','Назва закладу',d.pislyadyplomna_zakl||'')}</td>
+    <td>${inp('text','Диплом, номер, дата',d.pislyadyplomna_dypl||'')}</td>
+    <td>${inp('text','2020',d.pislyadyplomna_rik||'')}</td>
+    <td>${inp('text','Науковий ступінь',d.naukovyi_stupin||'')}</td>
+    ${READONLY?'':'<td></td>'}`;
+  if (!READONLY) tr.lastElementChild.appendChild(makeDelBtn(tr));
+  document.getElementById('pislya-tbody').appendChild(tr);
+}
+function renderPislya(rows) { rows.filter(r => r.pislyadyplomna_typ).forEach(r => addPislyaRow(r)); }
+
+function addFamilyRow(d = {}) {
+  const rels = ['','Дружина','Чоловік','Син','Дочка','Батько','Мати','Брат','Сестра','Інше'];
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td>${sel(rels,d.relationship||'')}</td>
+    <td>${inp('text',"Прізвище Ім'я По батькові",d.full_name||'')}</td>
+    <td>${inp('text','1985',d.birth_year||'')}</td>
+    ${READONLY?'':'<td></td>'}`;
+  if (!READONLY) tr.lastElementChild.appendChild(makeDelBtn(tr));
+  document.getElementById('family-tbody').appendChild(tr);
+}
+function renderFamily(rows) { rows.forEach(r => addFamilyRow(r)); }
+
+function addWorkRow(d = {}) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td>${inp('date','',d.start_date||'')}</td>
+    <td>${inp('date','',d.end_date||'')}</td>
+    <td>${inp('text','Організація / підрозділ',d.nazva_pidrozdilu||'')}</td>
+    <td>${inp('text','Посада',d.posada||'')}</td>
+    <td>${inp('text','№ наказу',d.nakaz||'')}</td>
+    <td>${inp('text','Причина',d.prychyna_zvilnennia||'')}</td>
+    ${READONLY?'':'<td></td>'}`;
+  if (!READONLY) tr.lastElementChild.appendChild(makeDelBtn(tr));
+  document.getElementById('work-tbody').appendChild(tr);
+}
+function renderWork(rows) { rows.forEach(r => addWorkRow(r)); }
+
+function addAppointmentRow(d = {}) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td>${inp('date','',d.data||'')}</td>
+    <td>${inp('text','Назва підрозділу (код)',d.nazva_pidrozdilu||'')}</td>
+    <td>${inp('text','Професія, посада',d.profesiya_posada||'')}</td>
+    <td>${inp('text','№ наказу',d.nakaz_nomer||'')}</td>
+    ${READONLY?'':'<td></td>'}`;
+  if (!READONLY) tr.lastElementChild.appendChild(makeDelBtn(tr));
+  document.getElementById('appointments-tbody').appendChild(tr);
+}
+function renderAppointments(rows) { rows.forEach(r => addAppointmentRow(r)); }
+
+function calcCalendarDays(tr) {
+  const inputs = tr.querySelectorAll('input[type=date]');
+  if (inputs.length < 2) return;
+  const start = inputs[0].value;
+  const end   = inputs[1].value;
+  if (!start || !end) return;
+  const diff = Math.round((new Date(end) - new Date(start)) / 86400000) + 1;
+  const calInput = tr.querySelector('.cal-days-input');
+  if (calInput && diff > 0) calInput.value = diff;
+}
+
+function addVacRow(d = {}) {
+  const types = ['','Щорічна основна','Додаткова','Соціальна','Навчальна','Без збереження зарплати'];
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td>${sel(types,d.typ||'')}</td>
+    <td>${inp('text','напр. 2024 рік',d.za_yakyi_period||'')}</td>
+    <td>${inp('date','',d.start_date||'')}</td>
+    <td>${inp('date','',d.end_date||'')}</td>
+    <td><input type="number" class="cal-days-input" value="${d.calendar_days||''}" placeholder="0" ${READONLY?'readonly':''} style="background:var(--navy-lt);font-weight:600;color:var(--navy);text-align:center;cursor:default;" readonly></td>
+    <td>${inp('number','0',d.days||'')}</td>
+    <td>${inp('text','№ наказу',d.nakaz||'')}</td>
+    ${READONLY?'':'<td></td>'}`;
+
+  // Автопідрахунок при зміні дат
+  if (!READONLY) {
+    const dateInputs = tr.querySelectorAll('input[type=date]');
+    dateInputs.forEach(input => {
+      input.addEventListener('change', () => calcCalendarDays(tr));
+    });
+    // Порахувати одразу якщо дати вже є
+    if (d.start_date && d.end_date) calcCalendarDays(tr);
+    tr.lastElementChild.appendChild(makeDelBtn(tr));
+  }
+
+  document.getElementById('vac-tbody').appendChild(tr);
+}
+function renderVac(rows) { rows.forEach(r => addVacRow(r)); }
+
+function calcStazhNaek() {
+  const dateInput = document.getElementById('data_pryyomu_naek');
+  const display   = document.getElementById('stazh_naek_display');
+  if (!dateInput || !display) return;
+
+  function update() {
+    const val = dateInput.value;
+    if (!val) { display.value = ''; return; }
+    const start = new Date(val);
+    const now   = new Date();
+    if (start > now) { display.value = 'Дата в майбутньому'; return; }
+
+    let years  = now.getFullYear() - start.getFullYear();
+    let months = now.getMonth()    - start.getMonth();
+    let days   = now.getDate()     - start.getDate();
+
+    if (days < 0) {
+      months--;
+      const prevMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+      days += prevMonth.getDate();
+    }
+    if (months < 0) { years--; months += 12; }
+
+    const parts = [];
+    if (years)  parts.push(years  + ' ' + (years  === 1 ? 'рік' : years  < 5 ? 'роки' : 'років'));
+    if (months) parts.push(months + ' ' + (months === 1 ? 'місяць' : months < 5 ? 'місяці' : 'місяців'));
+    if (days)   parts.push(days   + ' ' + (days   === 1 ? 'день' : days   < 5 ? 'дні' : 'днів'));
+    display.value = parts.length ? parts.join(' ') : 'Менше одного дня';
+  }
+
+  update();
+  dateInput.addEventListener('change', update);
+
+  // Оновлювати щодня (кожну хвилину для точності)
+  setInterval(update, 60000);
+}
+
+function padTabelny(val) {
+  if (!val) return null;
+  const digits = val.replace(/\D/g, '');
+  if (!digits) return val;
+  return digits.padStart(4, '0');
+}
+
+function applyTabelnyFormat() {
+  const field = document.getElementById('tabelny_nomer');
+  if (!field || field.readOnly) return;
+  field.addEventListener('blur', () => {
+    const padded = padTabelny(field.value);
+    if (padded) field.value = padded;
+  });
+  // Форматувати одразу якщо значення вже є
+  if (field.value) field.value = padTabelny(field.value) || field.value;
+}
+
+loadRelated();
+setupNav();
+applyTabelnyFormat();
+calcStazhNaek();
+</script>
+{% endblock %}
