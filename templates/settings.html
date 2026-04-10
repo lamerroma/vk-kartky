@@ -8,8 +8,9 @@
 
 <div class="content animate-in">
 
+  <!-- ══ РЕКВІЗИТИ ПІДПРИЄМСТВА ══ -->
   <div class="card" style="max-width:680px">
-    <div class="section-title">Реквізити підприємства</div>
+    <div class="section-title">🏢 Реквізити підприємства</div>
     <div class="card-body">
       <p style="font-size:13px;color:var(--text2);margin-bottom:16px">
         Ці дані автоматично підставляються у кожну нову картку П-2.
@@ -21,7 +22,7 @@
           <label>Повна назва підприємства (установи, організації)</label>
           <input type="text" id="nazva_pidpryemstva"
             value="{{ settings.nazva_pidpryemstva or '' }}"
-            placeholder='Повна назва підприємства'>
+            placeholder="Повна назва підприємства">
           <span style="font-size:11px;color:var(--text3);margin-top:2px">
             Відображається у шапці картки П-2
           </span>
@@ -31,7 +32,7 @@
           <label>Скорочена назва (для бічного меню)</label>
           <input type="text" id="nazva_pidpryemstva_short"
             value="{{ settings.nazva_pidpryemstva_short or '' }}"
-            placeholder='Скорочена назва'
+            placeholder="Скорочена назва"
             maxlength="40">
           <span style="font-size:11px;color:var(--text3);margin-top:2px">
             Відображається у лівій панелі замість "Відділ кадрів"
@@ -49,14 +50,101 @@
       </div>
 
       <div style="margin-top:20px;display:flex;align-items:center;gap:12px">
-        <button class="btn btn-primary-dark" onclick="saveSettings()">💾 Зберегти налаштування</button>
-        <span id="save-status" style="font-size:13px;color:var(--success);display:none">✓ Збережено</span>
+        <button class="btn btn-primary-dark" onclick="saveCompanySettings()">💾 Зберегти реквізити</button>
+        <span id="company-save-status" style="font-size:13px;color:var(--success);display:none">✓ Збережено</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ МЕРЕЖЕВИЙ ДОСТУП ══ -->
+  <div class="card" style="max-width:680px">
+    <div class="section-title">🌐 Мережевий доступ</div>
+    <div class="card-body">
+
+      <p style="font-size:13px;color:var(--text2);margin-bottom:16px">
+        Зміни набувають чинності після <strong>перезапуску програми</strong>.
+      </p>
+
+      <div class="form-grid cols1">
+
+        <!-- Перемикач доступу -->
+        <div class="form-group">
+          <label>Режим доступу</label>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-top:6px">
+
+            <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-weight:normal;
+                          background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);
+                          padding:10px 14px;" id="label-local">
+              <input type="radio" name="net_host" value="127.0.0.1"
+                {{ 'checked' if (settings.host or '127.0.0.1') == '127.0.0.1' else '' }}
+                onchange="onHostChange()"
+                style="margin-top:2px;flex-shrink:0">
+              <div>
+                <div style="font-weight:600;color:var(--text)">🔒 Тільки цей комп'ютер</div>
+                <div style="font-size:12px;color:var(--text3);margin-top:2px">
+                  Програма доступна лише локально (127.0.0.1). Рекомендовано для одного користувача.
+                </div>
+              </div>
+            </label>
+
+            <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-weight:normal;
+                          background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);
+                          padding:10px 14px;" id="label-network">
+              <input type="radio" name="net_host" value="0.0.0.0"
+                {{ 'checked' if (settings.host or '') == '0.0.0.0' else '' }}
+                onchange="onHostChange()"
+                style="margin-top:2px;flex-shrink:0">
+              <div>
+                <div style="font-weight:600;color:var(--text)">🌐 Всі пристрої в мережі</div>
+                <div style="font-size:12px;color:var(--text3);margin-top:2px">
+                  Програма доступна з будь-якого пристрою у локальній мережі. Переконайтесь що брандмауер відкритий для вказаного порту.
+                </div>
+              </div>
+            </label>
+
+          </div>
+        </div>
+
+        <!-- Порт -->
+        <div class="form-group" style="max-width:200px">
+          <label>Порт</label>
+          <input type="number" id="net_port"
+            value="{{ settings.port or '5000' }}"
+            min="1024" max="65535"
+            oninput="updateAddressDisplay()"
+            placeholder="5000">
+          <span style="font-size:11px;color:var(--text3);margin-top:2px">Допустимо: 1024 – 65535</span>
+        </div>
+
+        <!-- Поточна адреса -->
+        <div style="background:var(--navy-lt);border-left:3px solid var(--navy);
+                    border-radius:var(--radius);padding:12px 14px;">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;
+                      letter-spacing:.06em;color:var(--navy);margin-bottom:6px">
+            Адреса після перезапуску
+          </div>
+          <div id="address-local" style="font-size:13px;color:var(--text);margin-bottom:3px">
+            💻 Локально: <strong id="addr-local-val">—</strong>
+          </div>
+          <div id="address-network" style="font-size:13px;color:var(--text);display:none">
+            🌐 З мережі: <strong id="addr-network-val">—</strong>
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-top:6px" id="addr-hint"></div>
+        </div>
+
+      </div>
+
+      <div style="margin-top:20px;display:flex;align-items:center;gap:12px">
+        <button class="btn btn-primary-dark" onclick="saveNetworkSettings()">💾 Зберегти мережеві налаштування</button>
+        <span id="net-save-status" style="font-size:13px;color:var(--success);display:none">
+          ✓ Збережено — перезапустіть програму
+        </span>
       </div>
 
     </div>
   </div>
 
-  <!-- Інформаційна картка -->
+  <!-- ══ ПРО ПРОГРАМУ ══ -->
   <div class="card" style="max-width:680px;border-left:3px solid var(--navy)">
     <div class="card-header">
       <span class="card-title">ℹ️ Про програму</span>
@@ -69,11 +157,15 @@
         </div>
         <div class="field-row">
           <span class="field-lbl">Версія</span>
-          <span class="field-val">1.0.0</span>
+          <span class="field-val">2.0.0</span>
         </div>
         <div class="field-row">
           <span class="field-lbl">Ліцензія</span>
           <span class="field-val">GPL v3</span>
+        </div>
+        <div class="field-row">
+          <span class="field-lbl">Конфігурація</span>
+          <span class="field-val">settings.ini</span>
         </div>
         <div class="field-row">
           <span class="field-lbl">База даних</span>
@@ -88,7 +180,9 @@
 
 {% block scripts %}
 <script>
-async function saveSettings() {
+
+// ── Реквізити підприємства ──────────────────────────────────
+async function saveCompanySettings() {
   const data = {
     nazva_pidpryemstva:       document.getElementById('nazva_pidpryemstva').value.trim(),
     nazva_pidpryemstva_short: document.getElementById('nazva_pidpryemstva_short').value.trim(),
@@ -96,34 +190,94 @@ async function saveSettings() {
   };
 
   const res = await fetch('/api/settings', {
-    method: 'POST',
+    method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
+    body:    JSON.stringify(data)
   });
 
   if (res.ok) {
-    // Оновити назву в сайдбарі одразу
     const nameEl = document.getElementById('sidebar-company-name');
     if (nameEl) {
       nameEl.textContent = data.nazva_pidpryemstva_short || data.nazva_pidpryemstva || 'Відділ кадрів';
     }
-    showToast('Налаштування збережено ✓');
-    const status = document.getElementById('save-status');
-    status.style.display = 'inline';
-    setTimeout(() => { status.style.display = 'none'; }, 3000);
+    showToast('Реквізити збережено ✓');
+    const st = document.getElementById('company-save-status');
+    st.style.display = 'inline';
+    setTimeout(() => { st.style.display = 'none'; }, 3000);
   } else {
     showToast('Помилка збереження', 'error');
   }
 }
 
-// Показати кількість карток в базі
+// ── Мережеві налаштування ───────────────────────────────────
+function getSelectedHost() {
+  return document.querySelector('input[name="net_host"]:checked')?.value || '127.0.0.1';
+}
+
+function updateAddressDisplay() {
+  const host = getSelectedHost();
+  const port = parseInt(document.getElementById('net_port').value) || 5000;
+
+  document.getElementById('addr-local-val').textContent   = `http://127.0.0.1:${port}`;
+  document.getElementById('addr-network-val').textContent = `http://<IP-адреса>:${port}`;
+
+  const networkRow = document.getElementById('address-network');
+  const hint       = document.getElementById('addr-hint');
+
+  if (host === '0.0.0.0') {
+    networkRow.style.display = 'block';
+    hint.textContent = 'IP-адресу комп\'ютера можна дізнатись у налаштуваннях мережі (ipconfig / ip addr)';
+    // Підсвічуємо активний варіант
+    document.getElementById('label-network').style.borderColor = 'var(--navy)';
+    document.getElementById('label-local').style.borderColor   = 'var(--border)';
+  } else {
+    networkRow.style.display = 'none';
+    hint.textContent = '';
+    document.getElementById('label-local').style.borderColor   = 'var(--navy)';
+    document.getElementById('label-network').style.borderColor = 'var(--border)';
+  }
+}
+
+function onHostChange() {
+  updateAddressDisplay();
+}
+
+async function saveNetworkSettings() {
+  const host    = getSelectedHost();
+  const portVal = parseInt(document.getElementById('net_port').value);
+
+  if (isNaN(portVal) || portVal < 1024 || portVal > 65535) {
+    showToast('Порт має бути числом від 1024 до 65535', 'error');
+    return;
+  }
+
+  const res = await fetch('/api/settings', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ host: host, port: String(portVal) })
+  });
+
+  if (res.ok) {
+    showToast('Мережеві налаштування збережено ✓');
+    const st = document.getElementById('net-save-status');
+    st.style.display = 'inline';
+    // Не ховаємо — нагадування про перезапуск залишається видимим
+  } else {
+    const err = await res.json().catch(() => ({}));
+    showToast(err.error || 'Помилка збереження', 'error');
+  }
+}
+
+// ── Ініціалізація ───────────────────────────────────────────
+updateAddressDisplay();
+
 fetch('/api/stats').then(r => r.json()).then(d => {
   document.getElementById('db-info').textContent = `${d.total} карток П-2`;
 });
 
-// Enter для збереження
+// Ctrl+Enter — зберегти реквізити
 document.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) saveSettings();
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) saveCompanySettings();
 });
 </script>
 {% endblock %}

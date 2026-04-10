@@ -2,6 +2,7 @@ import sys
 import os
 import threading
 import webbrowser
+import configparser
 from flask import Flask, render_template, request, jsonify, redirect, url_for, g
 import sqlite3
 from datetime import datetime
@@ -14,9 +15,10 @@ else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     DATA_DIR = BASE_DIR
 
-DB_PATH = os.path.join(DATA_DIR, 'vk.db')
-TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')
-STATIC_DIR = os.path.join(BASE_DIR, 'static')
+DB_PATH       = os.path.join(DATA_DIR, 'vk.db')
+SETTINGS_PATH = os.path.join(DATA_DIR, 'settings.ini')
+TEMPLATE_DIR  = os.path.join(BASE_DIR, 'templates')
+STATIC_DIR    = os.path.join(BASE_DIR, 'static')
 
 app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
 
@@ -37,6 +39,60 @@ app.secret_key = _load_or_create_secret_key()
 _max_mb = int(os.environ.get('MAX_UPLOAD_MB', 2))
 app.config['MAX_CONTENT_LENGTH'] = _max_mb * 1024 * 1024
 
+# ─── SETTINGS (INI) ──────────────────────────────────────────
+
+def _migrate_settings_from_db(cfg):
+    """Переносить старі налаштування з таблиці settings БД в ini (одноразово при першому запуску)."""
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+        conn.close()
+        for row in rows:
+            k, v = row['key'], row['value'] or ''
+            if k in ('nazva_pidpryemstva', 'nazva_pidpryemstva_short', 'kod_edrpou'):
+                cfg['company'][k] = v
+    except Exception:
+        pass  # БД ще не існує або таблиці немає — це нормально при першому запуску
+
+def read_settings():
+    """Читає settings.ini. Якщо файл не існує — створює з дефолтними значеннями."""
+    cfg = configparser.ConfigParser()
+
+    # Дефолтні значення
+    cfg['company'] = {
+        'nazva_pidpryemstva':       '',
+        'nazva_pidpryemstva_short': '',
+        'kod_edrpou':               '',
+    }
+    cfg['network'] = {
+        'host': '127.0.0.1',
+        'port': '5000',
+    }
+
+    if os.path.exists(SETTINGS_PATH):
+        cfg.read(SETTINGS_PATH, encoding='utf-8')
+    else:
+        # Перший запуск — мігруємо з БД якщо є, потім зберігаємо ini
+        _migrate_settings_from_db(cfg)
+        _write_ini(cfg)
+
+    return cfg
+
+def _write_ini(cfg):
+    """Записує configparser об'єкт у файл."""
+    with open(SETTINGS_PATH, 'w', encoding='utf-8') as f:
+        cfg.write(f)
+
+def get_all_settings():
+    """Повертає всі налаштування як плаский dict для шаблонів і API."""
+    cfg = read_settings()
+    result = {}
+    for section in cfg.sections():
+        for key, value in cfg[section].items():
+            result[key] = value
+    return result
+
 # ─── DATABASE ────────────────────────────────────────────────
 def get_db():
     if 'db' not in g:
@@ -51,14 +107,6 @@ def close_db(error):
     db = g.pop('db', None)
     if db is not None:
         db.close()
-
-# ─── FIX #7: get_all_settings через get_db() ─────────────────
-def get_all_settings():
-    try:
-        rows = get_db().execute('SELECT key, value FROM settings').fetchall()
-        return {r['key']: r['value'] for r in rows}
-    except Exception:
-        return {}
 
 # ─── FIX #1: Allowlist для безпечного ALTER TABLE ────────────
 _ALLOWED_COL_TYPES = {'TEXT', 'INTEGER', 'REAL', 'BLOB', 'NUMERIC'}
@@ -248,14 +296,12 @@ def init_db():
             if col_name not in existing_vac:
                 _safe_add_column(c, 'vacations', col_name, col_type)
 
-        # Налаштування
+        # Стара таблиця settings залишається для зворотної сумісності (не видаляємо)
+        # Нові налаштування зберігаються в settings.ini
         c.execute('''CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT
         )''')
-        c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('nazva_pidpryemstva', '')")
-        c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('nazva_pidpryemstva_short', '')")
-        c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('kod_edrpou', '')")
 
         # Індекси для швидкого пошуку
         c.execute('CREATE INDEX IF NOT EXISTS idx_prizvyshche ON employees(prizvyshche)')
@@ -283,7 +329,7 @@ def validate_employee(data):
         return ['Невалідний формат даних (очікується JSON-об\'єкт)']
     errors = []
     prizvyshche = (data.get('prizvyshche') or '').strip()
-    imia = (data.get('imia') or '').strip()
+    imia        = (data.get('imia') or '').strip()
     if not prizvyshche:
         errors.append('Прізвище є обов\'язковим полем')
     if not imia:
@@ -330,7 +376,6 @@ def api_employees():
     q = request.args.get('q', '').strip()[:100]
     conn = get_db()
 
-    # Підрозділ і посада беруться з останнього запису розділу III (Призначення)
     base_select = '''
         SELECT e.id, e.tabelny_nomer, e.prizvyshche, e.imia, e.po_batkovi,
                a.data AS data_pryyomu,
@@ -371,9 +416,9 @@ def api_create_employee():
     if errors:
         return jsonify({'error': 'validation', 'messages': errors}), 400
 
-    now = datetime.now().isoformat()
+    now  = datetime.now().isoformat()
     conn = get_db()
-    c = conn.cursor()
+    c    = conn.cursor()
 
     # Перевірка унікальності табельного номера
     tabelny = data.get('tabelny_nomer', '').strip() if data.get('tabelny_nomer') else None
@@ -411,7 +456,6 @@ def api_create_employee():
         data.get('nazva_pidrozdilu'), data.get('data_pryyomu'),
         data.get('data_zvilnennia'), data.get('prychyna_zvilnennia'),
         data.get('rodinny_stan'), data.get('pensiia'),
-        # FIX #9: виправлено назву поля
         data.get('grupa_obliku'), data.get('katehoriia_obliku'), data.get('sklad'),
         data.get('viiskove_zvannia'), data.get('viiskova_spetsialnist'), data.get('prydatnist'),
         data.get('nazva_viiskkomatu_reiestr'), data.get('nazva_viiskkomatu_faktych'),
@@ -435,11 +479,11 @@ def api_get_employee(emp_id):
     emp = row_to_dict(conn.execute('SELECT * FROM employees WHERE id=?', (emp_id,)).fetchone())
     if not emp:
         return jsonify({'error': 'Not found'}), 404
-    emp['education'] = rows_to_list(conn.execute('SELECT * FROM education WHERE employee_id=?', (emp_id,)).fetchall())
-    emp['family'] = rows_to_list(conn.execute('SELECT * FROM family WHERE employee_id=?', (emp_id,)).fetchall())
+    emp['education']    = rows_to_list(conn.execute('SELECT * FROM education WHERE employee_id=?', (emp_id,)).fetchall())
+    emp['family']       = rows_to_list(conn.execute('SELECT * FROM family WHERE employee_id=?', (emp_id,)).fetchall())
     emp['work_history'] = rows_to_list(conn.execute('SELECT * FROM work_history WHERE employee_id=?', (emp_id,)).fetchall())
     emp['appointments'] = rows_to_list(conn.execute('SELECT * FROM appointments WHERE employee_id=? ORDER BY data', (emp_id,)).fetchall())
-    emp['vacations'] = rows_to_list(conn.execute('SELECT * FROM vacations WHERE employee_id=?', (emp_id,)).fetchall())
+    emp['vacations']    = rows_to_list(conn.execute('SELECT * FROM vacations WHERE employee_id=?', (emp_id,)).fetchall())
     return jsonify(emp)
 
 @app.route('/api/employees/<int:emp_id>', methods=['PUT'])
@@ -449,9 +493,9 @@ def api_update_employee(emp_id):
     if errors:
         return jsonify({'error': 'validation', 'messages': errors}), 400
 
-    now = datetime.now().isoformat()
+    now  = datetime.now().isoformat()
     conn = get_db()
-    c = conn.cursor()
+    c    = conn.cursor()
 
     # Перевірка унікальності табельного номера (ігноруємо поточного працівника)
     tabelny = data.get('tabelny_nomer', '').strip() if data.get('tabelny_nomer') else None
@@ -492,7 +536,6 @@ def api_update_employee(emp_id):
                 data.get('nazva_pidrozdilu'), data.get('data_pryyomu'),
                 data.get('data_zvilnennia'), data.get('prychyna_zvilnennia'),
                 data.get('rodinny_stan'), data.get('pensiia'),
-                # FIX #9: виправлено назву поля
                 data.get('grupa_obliku'), data.get('katehoriia_obliku'), data.get('sklad'),
                 data.get('viiskove_zvannia'), data.get('viiskova_spetsialnist'), data.get('prydatnist'),
                 data.get('nazva_viiskkomatu_reiestr'), data.get('nazva_viiskkomatu_faktych'),
@@ -500,11 +543,11 @@ def api_update_employee(emp_id):
                 emp_id
             ))
 
-            c.execute('DELETE FROM education WHERE employee_id=?', (emp_id,))
-            c.execute('DELETE FROM family WHERE employee_id=?', (emp_id,))
+            c.execute('DELETE FROM education WHERE employee_id=?',    (emp_id,))
+            c.execute('DELETE FROM family WHERE employee_id=?',       (emp_id,))
             c.execute('DELETE FROM work_history WHERE employee_id=?', (emp_id,))
             c.execute('DELETE FROM appointments WHERE employee_id=?', (emp_id,))
-            c.execute('DELETE FROM vacations WHERE employee_id=?', (emp_id,))
+            c.execute('DELETE FROM vacations WHERE employee_id=?',    (emp_id,))
 
             _save_education(c, emp_id, data.get('education', []))
             _save_family(c, emp_id, data.get('family', []))
@@ -520,7 +563,7 @@ def api_update_employee(emp_id):
 
 @app.route('/api/employees/<int:emp_id>', methods=['DELETE'])
 def api_delete_employee(emp_id):
-    conn = get_db()
+    conn   = get_db()
     result = conn.execute('DELETE FROM employees WHERE id=?', (emp_id,))
     conn.commit()
     # FIX #10: перевіряємо чи запис існував через rowcount
@@ -532,18 +575,18 @@ def api_delete_employee(emp_id):
 def api_prev_employee(emp_id):
     # FIX #8: залишаємо навігацію за id (прийнято рішення)
     conn = get_db()
-    row = conn.execute('SELECT id FROM employees WHERE id < ? ORDER BY id DESC LIMIT 1', (emp_id,)).fetchone()
+    row  = conn.execute('SELECT id FROM employees WHERE id < ? ORDER BY id DESC LIMIT 1', (emp_id,)).fetchone()
     return jsonify({'id': row['id'] if row else None})
 
 @app.route('/api/employees/<int:emp_id>/next')
 def api_next_employee(emp_id):
     conn = get_db()
-    row = conn.execute('SELECT id FROM employees WHERE id > ? ORDER BY id ASC LIMIT 1', (emp_id,)).fetchone()
+    row  = conn.execute('SELECT id FROM employees WHERE id > ? ORDER BY id ASC LIMIT 1', (emp_id,)).fetchone()
     return jsonify({'id': row['id'] if row else None})
 
 @app.route('/api/stats')
 def api_stats():
-    conn = get_db()
+    conn  = get_db()
     total = conn.execute('SELECT COUNT(*) FROM employees').fetchone()[0]
     return jsonify({'total': total})
 
@@ -554,12 +597,45 @@ def api_get_settings():
 @app.route('/api/settings', methods=['POST'])
 def api_save_settings():
     data = request.json
-    conn = get_db()
-    for key in ('nazva_pidpryemstva', 'nazva_pidpryemstva_short', 'kod_edrpou'):
-        if key in data:
-            conn.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)',
-                         (key, (data[key] or '').strip()))
-    conn.commit()
+    if not isinstance(data, dict):
+        return jsonify({'error': 'invalid data'}), 400
+
+    # Маппінг дозволених полів → секції ini
+    allowed = {
+        'nazva_pidpryemstva':       'company',
+        'nazva_pidpryemstva_short': 'company',
+        'kod_edrpou':               'company',
+        'host':                     'network',
+        'port':                     'network',
+    }
+
+    cfg     = read_settings()
+    changed = False
+
+    for key, section in allowed.items():
+        if key not in data:
+            continue
+        val = (data[key] or '').strip()
+
+        # Валідація порту
+        if key == 'port':
+            try:
+                port_int = int(val)
+                if not (1024 <= port_int <= 65535):
+                    return jsonify({'error': 'Порт має бути від 1024 до 65535'}), 400
+            except ValueError:
+                return jsonify({'error': 'Порт має бути числом'}), 400
+
+        # Валідація host
+        if key == 'host' and val not in ('127.0.0.1', '0.0.0.0'):
+            return jsonify({'error': 'Невірне значення host'}), 400
+
+        cfg[section][key] = val
+        changed = True
+
+    if changed:
+        _write_ini(cfg)
+
     return jsonify({'status': 'ok'})
 
 # ─── HELPERS: RELATED DATA ───────────────────────────────────
@@ -618,28 +694,44 @@ def handle_exception(e):
 # ─── STARTUP ─────────────────────────────────────────────────
 def setup_logging():
     import logging
-    log_path = os.path.join(DATA_DIR, 'vk_errors.log')
-    handler = logging.FileHandler(log_path, encoding='utf-8')
+    log_path  = os.path.join(DATA_DIR, 'vk_errors.log')
+    handler   = logging.FileHandler(log_path, encoding='utf-8')
     handler.setLevel(logging.ERROR)
     formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
     handler.setFormatter(formatter)
     app.logger.addHandler(handler)
     app.logger.setLevel(logging.ERROR)
 
-def open_browser(host):
+def open_browser(port):
     import time
     time.sleep(1)
-    webbrowser.open(f'http://{host}:5000')
+    webbrowser.open(f'http://127.0.0.1:{port}')
 
 if __name__ == '__main__':
     setup_logging()
     init_db()
 
-    # FIX #14: HOST визначає і мережевий режим і чи відкривати браузер
-    # Локально: python app.py  -> відкриє браузер на 127.0.0.1
-    # Мережево: HOST=0.0.0.0 python app.py -> не відкриває браузер
-    host = os.environ.get('HOST', '127.0.0.1')
-    if host in ('127.0.0.1', 'localhost'):
-        threading.Thread(target=open_browser, args=(host,), daemon=True).start()
+    # Читаємо мережеві налаштування з settings.ini
+    # Змінна середовища HOST має пріоритет над ini (для зворотної сумісності з v1.1.0)
+    cfg = read_settings()
 
-    app.run(debug=False, host=host, port=5000, use_reloader=False)
+    env_host = os.environ.get('HOST')
+    if env_host in ('127.0.0.1', 'localhost', '0.0.0.0'):
+        host = env_host
+    else:
+        host = cfg.get('network', 'host', fallback='127.0.0.1')
+        if host not in ('127.0.0.1', '0.0.0.0'):
+            host = '127.0.0.1'
+
+    try:
+        port = int(cfg.get('network', 'port', fallback='5000'))
+        if not (1024 <= port <= 65535):
+            port = 5000
+    except ValueError:
+        port = 5000
+
+    # FIX #14: браузер відкривається тільки при локальному запуску
+    if host in ('127.0.0.1', 'localhost'):
+        threading.Thread(target=open_browser, args=(port,), daemon=True).start()
+
+    app.run(debug=False, host=host, port=port, use_reloader=False)
