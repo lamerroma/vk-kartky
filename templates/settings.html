@@ -21,7 +21,7 @@
           <label>Повна назва підприємства (установи, організації)</label>
           <input type="text" id="nazva_pidpryemstva"
             value="{{ settings.nazva_pidpryemstva or '' }}"
-            placeholder='АТ "НАЕК "ЕНЕРГОАТОМ" ВП "АПІ"'>
+            placeholder='Повна назва підприємства'>
           <span style="font-size:11px;color:var(--text3);margin-top:2px">
             Відображається у шапці картки П-2
           </span>
@@ -31,7 +31,7 @@
           <label>Скорочена назва (для бічного меню)</label>
           <input type="text" id="nazva_pidpryemstva_short"
             value="{{ settings.nazva_pidpryemstva_short or '' }}"
-            placeholder='ВП "АПІ"'
+            placeholder='Скорочена назва'
             maxlength="40">
           <span style="font-size:11px;color:var(--text3);margin-top:2px">
             Відображається у лівій панелі замість "Відділ кадрів"
@@ -42,7 +42,7 @@
           <label>Код ЄДРПОУ</label>
           <input type="text" id="kod_edrpou"
             value="{{ settings.kod_edrpou or '' }}"
-            placeholder="24584661"
+            placeholder="00000000"
             maxlength="10">
         </div>
 

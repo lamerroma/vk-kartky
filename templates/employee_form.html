@@ -393,16 +393,16 @@
 
         <div class="form-grid cols3" style="margin-bottom:16px">
           <div class="form-group">
-            <label>Дата прийому в НАЕК</label>
+            <label>Дата прийому на підприємство</label>
             <input type="date" id="data_pryyomu_naek"
               value="{{ employee.data_pryyomu_naek or '' if employee else '' }}"
               {% if mode=='view' %}readonly{% endif %}>
           </div>
           <div class="form-group span2">
-            <label>Неперервний стаж в НАЕК</label>
+            <label>Неперервний стаж на підприємстві</label>
             <input type="text" id="stazh_naek_display" readonly
               style="background:var(--navy-lt);color:var(--navy);font-weight:600;cursor:default;"
-              placeholder="Заповніть дату прийому в НАЕК">
+              placeholder="Заповніть дату прийому на підприємство">
           </div>
         </div>
 
